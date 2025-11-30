@@ -1,0 +1,5 @@
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Ta aplikacja potrzebuje dostępu do lokalizacji aby pokazać użytkowników na mapie</string>
+
+<key>io.flutter.embedded_views_preview</key>
+<true/>
