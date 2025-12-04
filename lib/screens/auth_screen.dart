@@ -19,15 +19,25 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isLogin = true;
   bool _isLoading = false;
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+    });
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const MainScreen()),
-    );
+    await Future.delayed(const Duration(seconds: 1));
+
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const MainScreen()),
+      );
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
   }
 
   @override
@@ -173,7 +183,15 @@ class _AuthScreenState extends State<AuthScreen> {
                 Center(
                   child: TextButton(
                     onPressed: () {
-                      setState(() => _isLogin = !_isLogin);
+                      setState(() {
+                        _isLogin = !_isLogin;
+                        _emailController.clear();
+                        _passwordController.clear();
+                        if (!_isLogin) {
+                          _nameController.clear();
+                          _ageController.clear();
+                        }
+                      });
                     },
                     child: Text(
                       _isLogin

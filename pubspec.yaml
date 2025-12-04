@@ -15,6 +15,14 @@ dependencies:
   google_maps_flutter: ^2.2.6
   geolocator: ^11.0.1
 
+  # 🔴 ZAKOMENTUJ FIREBASE DLA CHROME
+  # firebase_core: ^2.24.0
+  # firebase_auth: ^4.16.0
+  # cloud_firestore: ^4.17.5
+  # firebase_storage: ^11.6.5
+
+  provider: ^6.1.5  # Możesz zostawić, to tylko state management
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
