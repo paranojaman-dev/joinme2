@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Event {
   final String id;
   final String creatorId;
@@ -13,6 +15,7 @@ class Event {
   final double latitude;
   final double longitude;
   final bool isActive;
+  final String imageUrl;
 
   Event({
     required this.id,
@@ -29,51 +32,46 @@ class Event {
     required this.latitude,
     required this.longitude,
     this.isActive = true,
+    this.imageUrl = '',
   });
 
-  // Przykładowe dane dla testów
-  static List<Event> sampleEvents = [
-    Event(
-      id: '1',
-      creatorId: 'user1',
-      creatorName: 'Jan Kowalski',
-      title: 'Wieczór planszówek',
-      type: 'Planszówka',
-      description: 'Gramy w Catan, Ticket to Ride i inne',
-      address: 'Kawiarnia Planszowa, Warszawska 15, Warszawa',
-      maxParticipants: 6,
-      dateTime: DateTime.now().add(const Duration(hours: 2)),
-      participants: ['user1', 'user2'],
-      latitude: 52.2297,
-      longitude: 21.0122,
-    ),
-    Event(
-      id: '2',
-      creatorId: 'user2',
-      creatorName: 'Anna Nowak',
-      title: 'Kino - nowy film Marvel',
-      type: 'Kino',
-      description: 'Idziemy na najnowszy film Marvel Universe',
-      address: 'Multikino Złote Tarasy, Warszawa',
-      maxParticipants: 4,
-      dateTime: DateTime.now().add(const Duration(days: 1)),
-      participants: ['user2'],
-      latitude: 52.2323,
-      longitude: 21.0062,
-    ),
-    Event(
-      id: '3',
-      creatorId: 'user3',
-      creatorName: 'Michał Wiśniewski',
-      title: 'Piwo po pracy',
-      type: 'Piwo',
-      description: 'Relaks przy piwie i rozmowy',
-      address: 'Pub pod Kogutem, Krakowskie Przedmieście 23',
-      maxParticipants: 8,
-      dateTime: DateTime.now().add(const Duration(hours: 3)),
-      participants: ['user3', 'user4', 'user5'],
-      latitude: 52.2400,
-      longitude: 21.0150,
-    ),
-  ];
+  factory Event.fromFirestore(DocumentSnapshot doc) {
+    Map data = doc.data() as Map<String, dynamic>;
+    return Event(
+      id: doc.id,
+      creatorId: data['creatorId'] ?? '',
+      creatorName: data['creatorName'] ?? '',
+      title: data['title'] ?? '',
+      type: data['type'] ?? '',
+      description: data['description'] ?? '',
+      address: data['address'] ?? '',
+      maxParticipants: data['maxParticipants'] ?? 0,
+      dateTime: (data['dateTime'] as Timestamp).toDate(),
+      endTime: (data['endTime'] as Timestamp?)?.toDate(),
+      participants: List<String>.from(data['participants'] ?? []),
+      latitude: (data['latitude'] ?? 0.0).toDouble(),
+      longitude: (data['longitude'] ?? 0.0).toDouble(),
+      isActive: data['isActive'] ?? true,
+      imageUrl: data['imageUrl'] ?? '',
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'creatorId': creatorId,
+      'creatorName': creatorName,
+      'title': title,
+      'type': type,
+      'description': description,
+      'address': address,
+      'maxParticipants': maxParticipants,
+      'dateTime': Timestamp.fromDate(dateTime),
+      'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,
+      'participants': participants,
+      'latitude': latitude,
+      'longitude': longitude,
+      'isActive': isActive,
+      'imageUrl': imageUrl,
+    };
+  }
 }

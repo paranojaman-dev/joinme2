@@ -1,37 +1,46 @@
+plugins {
+    id("com.android.application")
+    id("kotlin-android")
+    id("com.google.gms.google-services")
+    id("dev.flutter.flutter-gradle-plugin")
+}
+
 android {
-    namespace = "com.joinme2.app"
-    compileSdk = 34
+    namespace = "com.example.joinme2"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Włączenie wsparcia dla nowoczesnych funkcji Javy
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
         applicationId = "com.joinme2.app"
-        minSdk = 21
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
     }
 
     buildTypes {
-        getByName("debug") {
-            signingConfig = signingConfigs.getByName("debug")
-        }
-        getByName("release") {
-            isMinifyEnabled = false
+        release {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
 
-    dependencies {
-        // DODAJ TE LINIE:
-        implementation(platform("com.google.firebase:firebase-bom:34.6.0"))
-        implementation("com.google.firebase:firebase-analytics")
-    }
+dependencies {
+    // Biblioteka wymagana do "desugaringu" (poprawia błąd CheckAarMetadata)
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+}
+
+flutter {
+    source = "../.."
+}

@@ -1,7 +1,11 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../utils/constants.dart';
-import '../models/event_model.dart';
-import 'create_event_screen.dart';
+import 'package:joinme2/models/event_model.dart';
+import 'package:joinme2/screens/create_event_screen.dart';
+import 'package:joinme2/services/database_service.dart';
+import 'package:joinme2/utils/app_localizations.dart';
+import 'package:joinme2/utils/constants.dart';
 
 class EventsScreen extends StatefulWidget {
   const EventsScreen({super.key});
@@ -11,579 +15,244 @@ class EventsScreen extends StatefulWidget {
 }
 
 class _EventsScreenState extends State<EventsScreen> {
-  List<Event> _events = Event.sampleEvents;
-  String _selectedFilter = 'Wszystkie';
-
-  final List<String> _filters = [
-    'Wszystkie',
-    'Planszówka',
-    'Kino',
-    'Piwo',
-    'Jedzenie',
-    'Moje eventy',
-  ];
-
-  List<Event> get _filteredEvents {
-    if (_selectedFilter == 'Wszystkie') return _events;
-    if (_selectedFilter == 'Moje eventy') {
-      return _events.where((e) => e.creatorName == 'Jan Kowalski').toList();
-    }
-    return _events.where((e) => e.type == _selectedFilter).toList();
-  }
-
-  void _createNewEvent() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => CreateEventScreen()),
-    );
-
-    // Jeśli event został stworzony, odśwież listę
-    if (result != null && result == true) {
-      setState(() {
-        // Tu później dodamy nowy event do listy
-      });
-    }
-  }
+  final String _currentUserId = FirebaseAuth.instance.currentUser!.uid;
+  final DatabaseService _databaseService = DatabaseService();
+  String _selectedFilter = 'all';
 
   void _joinEvent(String eventId) {
-    setState(() {
-      final index = _events.indexWhere((e) => e.id == eventId);
-      if (index != -1) {
-        final event = _events[index];
-        if (!event.participants.contains('current_user')) {
-          _events[index] = Event(
-            id: event.id,
-            creatorId: event.creatorId,
-            creatorName: event.creatorName,
-            title: event.title,
-            type: event.type,
-            description: event.description,
-            address: event.address,
-            maxParticipants: event.maxParticipants,
-            dateTime: event.dateTime,
-            endTime: event.endTime,
-            participants: [...event.participants, 'current_user'],
-            latitude: event.latitude,
-            longitude: event.longitude,
-            isActive: event.isActive,
-          );
-        }
-      }
-    });
-
+    final loc = AppLocalizations.of(context)!;
+    _databaseService.joinEvent(eventId, _currentUserId);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Dołączono do eventu!'),
-        backgroundColor: AppColors.primaryColor,
+      SnackBar(content: Text(loc.translate('event_joined')), backgroundColor: Colors.green),
+    );
+  }
+
+  void _leaveEvent(String eventId) {
+    final loc = AppLocalizations.of(context)!;
+    _databaseService.leaveEvent(eventId, _currentUserId);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(loc.translate('leave_event')), backgroundColor: Colors.orange),
+    );
+  }
+
+  void _deleteEvent(String eventId) async {
+    final loc = AppLocalizations.of(context)!;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(loc.translate('delete_event_title')),
+        content: Text(loc.translate('delete_event_confirm')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(loc.translate('no'))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: Text(loc.translate('yes'), style: const TextStyle(color: Colors.red))
+          ),
+        ],
       ),
     );
+
+    if (confirm == true) {
+      await _databaseService.deleteEvent(eventId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(loc.translate('event_removed')))
+        );
+      }
+    }
   }
 
   void _showEventDetails(Event event) {
+    final loc = AppLocalizations.of(context)!;
+    final isCreator = event.creatorId == _currentUserId;
+    final isJoined = event.participants.contains(_currentUserId);
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.surfaceColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 20),
-                  decoration: BoxDecoration(
-                    color: AppColors.textColor70,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-
-              Row(
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: _getEventTypeColor(event.type),
-                      borderRadius: BorderRadius.circular(10),
+                  if (event.imageUrl.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(event.imageUrl, height: 200, width: double.infinity, fit: BoxFit.cover),
                     ),
-                    child: Icon(
-                      _getEventTypeIcon(event.type),
-                      color: Colors.white,
-                      size: 24,
-                    ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(event.title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                      ),
+                      if (isCreator)
+                        Row(
+                          children: [
+                            IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () {
+                              Navigator.pop(context);
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => CreateEventScreen(eventToEdit: event)));
+                            }),
+                            IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () {
+                              Navigator.pop(context);
+                              _deleteEvent(event.id);
+                            }),
+                          ],
+                        ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          event.title,
-                          style: const TextStyle(
-                            color: AppColors.textColor,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                  Text('${loc.translate('by')} ${event.creatorName}', style: const TextStyle(color: Colors.grey)),
+                  const Divider(height: 32),
+                  _buildDetailRow(Icons.location_on, event.address),
+                  _buildDetailRow(Icons.people, '${event.participants.length} / ${event.maxParticipants} ${loc.translate('joined_count')}'),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: isCreator ? null : (isJoined ? () => _leaveEvent(event.id) : () => _joinEvent(event.id)),
+                            style: ElevatedButton.styleFrom(backgroundColor: isJoined ? Colors.red : Colors.green),
+                            child: Text(isJoined ? loc.translate('leave_event') : loc.translate('join_event')),
                           ),
                         ),
-                        Text(
-                          'Przez ${event.creatorName}',
-                          style: const TextStyle(
-                            color: AppColors.textColor70,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-
-              const SizedBox(height: 20),
-
-              if (event.description.isNotEmpty) ...[
-                const Text(
-                  'Opis',
-                  style: TextStyle(
-                    color: AppColors.textColor,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  event.description,
-                  style: const TextStyle(
-                    color: AppColors.textColor,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-
-              const Text(
-                'Szczegóły',
-                style: TextStyle(
-                  color: AppColors.textColor,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              _buildDetailRow(
-                icon: Icons.location_on,
-                text: event.address,
-              ),
-              const SizedBox(height: 8),
-
-              _buildDetailRow(
-                icon: Icons.schedule,
-                text: _formatDateTime(event.dateTime),
-              ),
-              const SizedBox(height: 8),
-
-              _buildDetailRow(
-                icon: Icons.people,
-                text: '${event.participants.length}/${event.maxParticipants} uczestników',
-              ),
-
-              const SizedBox(height: 30),
-
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _joinEvent(event.id);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primaryColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'DOŁĄCZ DO EVENTU',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildDetailRow({required IconData icon, required String text}) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(
-          icon,
-          size: 20,
-          color: AppColors.textColor70,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(
-              color: AppColors.textColor,
-              fontSize: 14,
-            ),
-          ),
-        ),
-      ],
+  Widget _buildDetailRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(children: [Icon(icon, size: 20, color: Colors.grey), const SizedBox(width: 12), Text(text)]),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+    
+    final List<Map<String, String>> filters = [
+      {'key': 'all', 'label': loc.translate('all')},
+      {'key': 'cinema', 'label': loc.translate('cinema')},
+      {'key': 'walk', 'label': loc.translate('walk')},
+      {'key': 'discussion', 'label': loc.translate('discussion')},
+      {'key': 'restaurant', 'label': loc.translate('restaurant')},
+      {'key': 'bar', 'label': loc.translate('bar')},
+      {'key': 'disco', 'label': loc.translate('disco')},
+      {'key': 'concert', 'label': loc.translate('concert')},
+      {'key': 'meeting', 'label': loc.translate('meeting')},
+      {'key': 'board_games', 'label': loc.translate('board_games')},
+      {'key': 'trip', 'label': loc.translate('trip')},
+      {'key': 'match', 'label': loc.translate('match')},
+      {'key': 'grill', 'label': loc.translate('grill')},
+      {'key': 'gallery', 'label': loc.translate('gallery')},
+      {'key': 'shopping', 'label': loc.translate('shopping')},
+      {'key': 'party', 'label': loc.translate('party')},
+      {'key': 'my_events', 'label': loc.translate('my_events')},
+    ];
+
     return Scaffold(
-      backgroundColor: AppColors.backgroundColor,
-      floatingActionButton: FloatingActionButton(
-        onPressed: _createNewEvent,
-        backgroundColor: AppColors.primaryColor,
-        child: const Icon(Icons.add),
-      ),
-      body: Column(
+      appBar: AppBar(title: Text(loc.translate('events'))),
+      body: Stack(
         children: [
-          // Nagłówek
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-            color: AppColors.surfaceColor,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Eventy',
-                  style: TextStyle(
-                    color: AppColors.textColor,
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Znajdź lub stwórz wydarzenie',
-                  style: TextStyle(
-                    color: AppColors.textColor70,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Filtry
-                SizedBox(
-                  height: 40,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _filters.length,
-                    itemBuilder: (context, index) {
-                      final filter = _filters[index];
-                      final isSelected = _selectedFilter == filter;
-
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          label: Text(filter),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            setState(() {
-                              _selectedFilter = filter;
-                            });
-                          },
-                          backgroundColor: AppColors.surfaceColor,
-                          selectedColor: AppColors.primaryColor,
-                          labelStyle: TextStyle(
-                            color: isSelected ? Colors.white : AppColors.textColor,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+          // SUBTELNE LOGO W TLE
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.05,
+              child: Center(child: Icon(Icons.chair, size: 300, color: Colors.green.shade400)),
             ),
           ),
-
-          // Lista eventów
-          Expanded(
-            child: _filteredEvents.isEmpty
-                ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.event_busy,
-                    size: 64,
-                    color: AppColors.textColor70,
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    'Brak eventów',
-                    style: TextStyle(
-                      color: AppColors.textColor,
-                      fontSize: 18,
+          Column(
+            children: [
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: filters.map((f) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(f['label']!),
+                      selected: _selectedFilter == f['key'],
+                      onSelected: (val) => setState(() => _selectedFilter = f['key']!),
                     ),
-                  ),
-                  Text(
-                    'Stwórz pierwszy event!',
-                    style: TextStyle(
-                      color: AppColors.textColor70,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
+                  )).toList(),
+                ),
               ),
-            )
-                : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _filteredEvents.length,
-              itemBuilder: (context, index) {
-                final event = _filteredEvents[index];
-                return _buildEventCard(event);
-              },
-            ),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: _databaseService.getEvents(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                    var events = snapshot.data!.docs.map((d) => Event.fromFirestore(d)).toList();
+                    
+                    if (_selectedFilter == 'my_events') {
+                      events = events.where((e) => e.creatorId == _currentUserId).toList();
+                    } else if (_selectedFilter != 'all') {
+                      events = events.where((e) => e.type == _selectedFilter).toList();
+                    }
+
+                    if (events.isEmpty) {
+                      return Center(child: Text(loc.translate('no_msgs'))); 
+                    }
+
+                    return ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                      itemCount: events.length,
+                      itemBuilder: (context, i) => ListTile(
+                        leading: CircleAvatar(
+                          backgroundImage: events[i].imageUrl.isNotEmpty ? NetworkImage(events[i].imageUrl) : null,
+                          child: events[i].imageUrl.isEmpty ? Icon(_getIcon(events[i].type)) : null,
+                        ),
+                        title: Text(events[i].title),
+                        subtitle: Text('${events[i].participants.length}/${events[i].maxParticipants} ${loc.translate('participants')}'),
+                        onTap: () => _showEventDetails(events[i]),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEventCard(Event event) {
-    final participantsCount = event.participants.length;
-    final spotsLeft = event.maxParticipants - participantsCount;
-    final isFull = spotsLeft <= 0;
-    final isJoined = event.participants.contains('current_user');
-
-    return GestureDetector(
-      onTap: () => _showEventDetails(event),
-      child: Card(
-        margin: const EdgeInsets.only(bottom: 16),
-        color: AppColors.surfaceColor,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  // Ikona typu eventu
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: _getEventTypeColor(event.type),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      _getEventTypeIcon(event.type),
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          event.title,
-                          style: const TextStyle(
-                            color: AppColors.textColor,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          'Przez ${event.creatorName}',
-                          style: const TextStyle(
-                            color: AppColors.textColor70,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (isJoined)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryColor.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.primaryColor),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.check, size: 12, color: AppColors.primaryColor),
-                          SizedBox(width: 4),
-                          Text(
-                            'DOŁĄCZONO',
-                            style: TextStyle(
-                              color: AppColors.primaryColor,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-
-              // Opis
-              Text(
-                event.description,
-                style: const TextStyle(
-                  color: AppColors.textColor,
-                  fontSize: 14,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-
-              const SizedBox(height: 12),
-
-              // Informacje
-              Row(
-                children: [
-                  Icon(
-                    Icons.location_on,
-                    size: 16,
-                    color: AppColors.textColor70,
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      event.address,
-                      style: TextStyle(
-                        color: AppColors.textColor70,
-                        fontSize: 12,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 8),
-
-              Row(
-                children: [
-                  Icon(
-                    Icons.schedule,
-                    size: 16,
-                    color: AppColors.textColor70,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _formatDateTime(event.dateTime),
-                    style: TextStyle(
-                      color: AppColors.textColor70,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const Spacer(),
-                  Icon(
-                    Icons.people,
-                    size: 16,
-                    color: AppColors.textColor70,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '$participantsCount/${event.maxParticipants}',
-                    style: TextStyle(
-                      color: isFull ? AppColors.errorColor : AppColors.textColor70,
-                      fontSize: 12,
-                      fontWeight: isFull ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
-
-              // Przycisk dołączenia
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: isFull || isJoined ? null : () => _joinEvent(event.id),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isJoined ? AppColors.textColor70 : AppColors.primaryColor,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: AppColors.textColor70,
-                  ),
-                  child: Text(
-                    isJoined ? 'DOŁĄCZONO' : (isFull ? 'BRAK MIEJSC' : 'DOŁĄCZ DO EVENTU'),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _getEventTypeColor(String type) {
+  IconData _getIcon(String type) {
     switch (type) {
-      case 'Planszówka':
-        return const Color(0xFFFF9800); // Orange
-      case 'Kino':
-        return const Color(0xFF9C27B0); // Purple
-      case 'Piwo':
-        return const Color(0xFFFFC107); // Amber
-      case 'Jedzenie':
-        return const Color(0xFFF44336); // Red
-      default:
-        return AppColors.primaryColor;
-    }
-  }
-
-  IconData _getEventTypeIcon(String type) {
-    switch (type) {
-      case 'Planszówka':
-        return Icons.casino;
-      case 'Kino':
-        return Icons.movie;
-      case 'Piwo':
-        return Icons.local_bar;
-      case 'Jedzenie':
-        return Icons.restaurant;
-      default:
-        return Icons.event;
-    }
-  }
-
-  String _formatDateTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final eventDay = DateTime(dateTime.year, dateTime.month, dateTime.day);
-
-    if (eventDay == today) {
-      return 'Dziś ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } else if (eventDay == today.add(const Duration(days: 1))) {
-      return 'Jutro ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } else {
-      return '${dateTime.day.toString().padLeft(2, '0')}.${dateTime.month.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+      case 'cinema': return Icons.movie;
+      case 'walk': return Icons.directions_walk;
+      case 'bar': return Icons.local_bar;
+      case 'restaurant': return Icons.restaurant;
+      case 'board_games': return Icons.casino;
+      case 'match': return Icons.sports_soccer;
+      case 'concert': return Icons.music_note;
+      case 'shopping': return Icons.shopping_cart;
+      case 'gallery': return Icons.palette;
+      case 'discussion': return Icons.forum;
+      case 'disco': return Icons.nightlife;
+      case 'meeting': return Icons.people;
+      case 'trip': return Icons.map;
+      case 'grill': return Icons.outdoor_grill;
+      case 'party': return Icons.celebration;
+      default: return Icons.event;
     }
   }
 }

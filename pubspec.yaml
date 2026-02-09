@@ -1,4 +1,4 @@
-name: joinme
+name: joinme2
 description: Aplikacja towarzysko-socjalizująca
 
 publish_to: 'none'
@@ -11,22 +11,46 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  intl: any
   cupertino_icons: ^1.0.2
-  google_maps_flutter: ^2.2.6
-  geolocator: ^11.0.1
+  google_maps_flutter: ^2.10.0
+  geolocator: ^13.0.0
+  image_picker: ^1.1.2
+  in_app_purchase: ^3.2.0
+  google_mobile_ads: ^5.2.0
+  flutter_localizations:
+    sdk: flutter
 
-  # 🔴 ZAKOMENTUJ FIREBASE DLA CHROME
-  # firebase_core: ^2.24.0
-  # firebase_auth: ^4.16.0
-  # cloud_firestore: ^4.17.5
-  # firebase_storage: ^11.6.5
+  firebase_core: ^3.10.0
+  firebase_auth: ^5.4.0
+  cloud_firestore: ^5.6.0
+  firebase_storage: ^12.4.0
+  firebase_app_check: ^0.3.0
+  firebase_messaging: ^15.2.10
 
-  provider: ^6.1.5  # Możesz zostawić, to tylko state management
+  provider: ^6.1.2
+  geocoding: ^3.0.0
+  flutter_local_notifications: ^18.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.0
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/images/app_icon.png"
+  adaptive_icon_background: "#ffffff"
+  adaptive_icon_foreground: "assets/images/app_icon.png"
+  notification_icon:
+    enabled: true
+    image_path: "assets/images/app_icon.png"
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/lang/

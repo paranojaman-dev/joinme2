@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'auth_screen.dart';
+import 'package:joinme2/app_state_manager.dart';
+import 'package:joinme2/screens/auth_wrapper.dart';
+import 'package:joinme2/utils/app_localizations.dart';
+import 'package:provider/provider.dart';
 import '../utils/constants.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -17,19 +20,25 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   _navigateToNext() async {
+    // Czekaj na inicjalizację AppStateManager
+    final appState = Provider.of<AppStateManager>(context, listen: false);
+    while (!appState.isInitialized) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
     await Future.delayed(const Duration(seconds: 2));
 
-    // Sprawdź czy widget jest jeszcze zamontowany
     if (!mounted) return;
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => const AuthScreen()),
+      MaterialPageRoute(builder: (context) => const AuthWrapper()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Używamy standardowego tekstu, dopóki AppLocalizations nie będzie gotowy
     return Scaffold(
       backgroundColor: AppColors.backgroundColor,
       body: Center(
@@ -59,12 +68,18 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
             ),
             const SizedBox(height: 10),
-            const Text(
-              'Znajdź towarzystwo',
-              style: TextStyle(
-                color: Color(0xFF757575),
-                fontSize: 16,
-              ),
+            Consumer<AppStateManager>(
+              builder: (context, appState, child) {
+                if (!appState.isInitialized) return const SizedBox.shrink();
+                final loc = AppLocalizations.of(context);
+                return Text(
+                  loc?.translate('splash_tagline') ?? 'Znajdź towarzystwo',
+                  style: const TextStyle(
+                    color: Color(0xFF757575),
+                    fontSize: 16,
+                  ),
+                );
+              },
             ),
           ],
         ),
