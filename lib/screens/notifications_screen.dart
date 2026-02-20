@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:joinme2/models/event_model.dart';
 import 'package:joinme2/services/database_service.dart';
 import 'package:joinme2/screens/user_profile_screen.dart';
 import 'package:joinme2/screens/chat_screen.dart';
+import 'package:joinme2/screens/event_details_screen.dart';
 import 'package:joinme2/utils/app_localizations.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -99,16 +101,28 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           onTap: () async {
             _databaseService.markNotificationAsRead(_currentUserId, notificationId);
             
+            // LOGIKA PRZEJŚCIA DO WYDARZENIA
             if (type == 'created_new_event' || type == 'updated_event' || type == 'event_joined') {
-              // Powiadomienia o wydarzeniach -> Wracamy do głównego ekranu (Mapy/Wydarzeń)
-              Navigator.of(context).popUntil((route) => route.isFirst);
+              final eventId = extraData?['eventId'];
+              if (eventId != null) {
+                // Pobieramy dane wydarzenia i przechodzimy do szczegółów
+                try {
+                  final eventSnap = await FirebaseFirestore.instance.collection('events').doc(eventId).get();
+                  if (eventSnap.exists && mounted) {
+                    final event = Event.fromFirestore(eventSnap);
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => EventDetailsScreen(event: event)));
+                  }
+                } catch (e) {
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                }
+              } else {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              }
             } else if (type == 'new_message') {
-              // Czat
               if (fromUserId != null) {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => ChatScreen(peerId: fromUserId, peerName: senderName)));
               }
             } else if (fromUserId != null) {
-              // Profil użytkownika
               Navigator.push(context, MaterialPageRoute(builder: (context) => UserProfileScreen(userId: fromUserId)));
             }
           },

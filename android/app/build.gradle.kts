@@ -7,13 +7,14 @@ plugins {
 
 android {
     namespace = "com.example.joinme2"
-    compileSdk = flutter.compileSdkVersion
+    
+    // Wymuszona wersja 36 dla pełnej kompatybilności z nowymi bibliotekami
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        // Włączenie wsparcia dla nowoczesnych funkcji Javy
         isCoreLibraryDesugaringEnabled = true
     }
 
@@ -24,7 +25,7 @@ android {
     defaultConfig {
         applicationId = "com.joinme2.app"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36 // Podbite do 36, aby pasowało do compileSdk
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -37,7 +38,6 @@ android {
 }
 
 dependencies {
-    // Biblioteka wymagana do "desugaringu" (poprawia błąd CheckAarMetadata)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
 

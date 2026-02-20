@@ -37,9 +37,26 @@ class MapStyles {
 ]
 ''';
 
+  static const String neon = r'''
+[
+  { "elementType": "geometry", "stylers": [ { "color": "#24063c" } ] },
+  { "elementType": "labels.text.fill", "stylers": [ { "color": "#863fa6" } ] },
+  { "elementType": "labels.text.stroke", "stylers": [ { "color": "#24063c" } ] },
+  { "featureType": "administrative", "elementType": "geometry.stroke", "stylers": [ { "color": "#42057f" } ] },
+  { "featureType": "landscape", "elementType": "geometry", "stylers": [ { "color": "#10273c" } ] },
+  { "featureType": "poi", "elementType": "geometry", "stylers": [ { "color": "#292929" } ] },
+  { "featureType": "poi.park", "elementType": "geometry", "stylers": [ { "color": "#29920c" } ] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [ { "color": "#42057f" } ] },
+  { "featureType": "road", "elementType": "geometry.stroke", "stylers": [ { "color": "#630486" } ] },
+  { "featureType": "road.highway", "elementType": "geometry", "stylers": [ { "color": "#863fa6" } ] },
+  { "featureType": "water", "elementType": "geometry", "stylers": [ { "color": "#0789ca" } ] }
+]
+''';
+
   static const Map<String, String> styles = {
     'normal': classic,
     'dark': dark,
     'retro': retro,
+    'neon': neon,
   };
 }

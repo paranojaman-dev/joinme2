@@ -3,6 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class UserModel {
   final String uid;
   final String email;
+  final String firstName;
+  final String lastName;
+  final String nickname;
   final String displayName;
   final DateTime? dateOfBirth;
   final String? gender;
@@ -16,10 +19,14 @@ class UserModel {
   final DateTime lastSeen;
   final GeoPoint? location;
   final Map<String, dynamic> currentActivity;
+  final List friends;
 
   UserModel({
     required this.uid,
     required this.email,
+    required this.firstName,
+    required this.lastName,
+    required this.nickname,
     required this.displayName,
     this.dateOfBirth,
     this.gender,
@@ -33,6 +40,7 @@ class UserModel {
     required this.lastSeen,
     this.location,
     required this.currentActivity,
+    required this.friends,
   });
 
   int? get age {
@@ -50,6 +58,9 @@ class UserModel {
     return {
       'uid': uid,
       'email': email,
+      'firstName': firstName,
+      'lastName': lastName,
+      'nickname': nickname,
       'displayName': displayName,
       'dateOfBirth': dateOfBirth != null ? Timestamp.fromDate(dateOfBirth!) : null,
       'gender': gender,
@@ -65,6 +76,7 @@ class UserModel {
       },
       'location': location,
       'currentActivity': currentActivity,
+      'friends': friends,
     };
   }
 
@@ -72,34 +84,26 @@ class UserModel {
     bool online = false;
     DateTime seen = DateTime.now();
     
-    // Bezpieczne wyciąganie statusu
-    final dynamic s = map['status'];
-    if (s is Map) {
-      online = s['isOnline'] ?? false;
-      seen = (s['lastSeen'] as Timestamp?)?.toDate() ?? DateTime.now();
-    } else if (map['status_info'] is Map) {
+    if (map['status_info'] is Map) {
       online = map['status_info']['isOnline'] ?? false;
       seen = (map['status_info']['lastSeen'] as Timestamp?)?.toDate() ?? DateTime.now();
     }
 
-    // Bezpieczne wyciąganie lokalizacji
     GeoPoint? loc;
     if (map['location'] is GeoPoint) {
       loc = map['location'];
-    } else if (map['location'] is Map) {
-      loc = GeoPoint(
-        (map['location']['latitude'] ?? 0.0).toDouble(),
-        (map['location']['longitude'] ?? 0.0).toDouble(),
-      );
     }
 
     return UserModel(
       uid: map['uid'] ?? '',
       email: map['email'] ?? '',
+      firstName: map['firstName'] ?? '',
+      lastName: map['lastName'] ?? '',
+      nickname: map['nickname'] ?? 'User',
       displayName: map['displayName'] ?? 'Użytkownik',
       dateOfBirth: (map['dateOfBirth'] as Timestamp?)?.toDate(),
       gender: map['gender'],
-      status: (s is String) ? s : null,
+      status: map['status'] is String ? map['status'] : null,
       interests: List<String>.from(map['interests'] ?? []),
       languages: map['languages'] != null ? List<String>.from(map['languages']) : null,
       photoURL: map['photoURL'] ?? '',
@@ -109,6 +113,7 @@ class UserModel {
       lastSeen: seen,
       location: loc,
       currentActivity: Map<String, dynamic>.from(map['currentActivity'] ?? {}),
+      friends: List.from(map['friends'] ?? []),
     );
   }
 }

@@ -1,10 +1,10 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:joinme2/models/user_model.dart';
 import 'package:joinme2/screens/profile_screen.dart';
 import 'package:joinme2/services/database_service.dart';
+import 'package:joinme2/utils/app_localizations.dart';
 import 'package:joinme2/utils/constants.dart';
 
 class UserProfileScreen extends StatefulWidget {
@@ -61,68 +61,93 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+    final isMe = widget.userId == _currentUserId;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.userId == _currentUserId ? 'Mój Profil' : 'Profil użytkownika'),
+        title: Text(isMe ? loc.translate('profile') : loc.translate('app_title')),
       ),
-      body: FutureBuilder<DocumentSnapshot>(
-        future: _databaseService.getUserData(widget.userId),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData || _isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final userData = snapshot.data!.data() as Map<String, dynamic>;
-          final user = UserModel.fromMap(userData);
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                CircleAvatar(
-                  radius: 60,
-                  backgroundImage: user.photoURL.isNotEmpty ? NetworkImage(user.photoURL) : null,
-                  child: user.photoURL.isEmpty ? const Icon(Icons.person, size: 60) : null,
-                ),
-                const SizedBox(height: 16),
-                Text(user.displayName, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Text(user.dateOfBirth != null ? '${_calculateAge(user.dateOfBirth!)} lat' : 'Wiek nieznany', style: const TextStyle(fontSize: 18, color: Colors.grey)),
-                const SizedBox(height: 16),
-                if (user.status != null && user.status!.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    decoration: BoxDecoration(color: AppColors.surfaceColor, borderRadius: BorderRadius.circular(20)),
-                    child: Text(user.status!, style: const TextStyle(fontStyle: FontStyle.italic), textAlign: TextAlign.center),
-                  ),
-                const SizedBox(height: 24),
-                _buildInfoRow(Icons.interests, 'Zainteresowania', user.interests.join(', ')),
-                if (user.languages != null && user.languages!.isNotEmpty)
-                  _buildInfoRow(Icons.language, 'Języki', user.languages!.join(', ')),
-                const SizedBox(height: 32),
-                _buildActionButtons(),
-              ],
+      body: Stack(
+        children: [
+          // SUBTELNE LOGO W TLE (10% Widoczności)
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.10,
+              child: Center(child: Icon(Icons.chair, size: 300, color: Colors.green.shade400)),
             ),
-          );
-        },
+          ),
+          FutureBuilder<DocumentSnapshot>(
+            future: _databaseService.getUserData(widget.userId),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData || _isLoading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final userData = snapshot.data!.data() as Map<String, dynamic>;
+              final user = UserModel.fromMap(userData);
+
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 20),
+                    CircleAvatar(
+                      radius: 70,
+                      backgroundColor: Colors.green.shade700,
+                      child: CircleAvatar(
+                        radius: 66,
+                        backgroundImage: user.photoURL.isNotEmpty ? NetworkImage(user.photoURL) : null,
+                        child: user.photoURL.isEmpty ? const Icon(Icons.person, size: 70) : null,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(user.displayName, style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Text(user.dateOfBirth != null ? '${_calculateAge(user.dateOfBirth!)} ${loc.translate('years')}' : loc.translate('no_birth_date'), 
+                         style: const TextStyle(fontSize: 18, color: Colors.grey)),
+                    const SizedBox(height: 24),
+                    if (user.status != null && user.status!.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceColor.withOpacity(0.8), 
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(color: Colors.green.shade900.withOpacity(0.5))
+                        ),
+                        child: Text(user.status!, style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+                      ),
+                    const SizedBox(height: 32),
+                    _buildInfoRow(Icons.favorite, loc.translate('interests_hint').split('(')[0], user.interests.join(', ')),
+                    if (user.languages != null && user.languages!.isNotEmpty)
+                      _buildInfoRow(Icons.translate, loc.translate('languages_hint').split('(')[0], user.languages!.join(', ')),
+                    const SizedBox(height: 40),
+                    _buildActionButtons(loc, isMe),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildInfoRow(IconData icon, String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 12.0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: AppColors.primaryColor),
-          const SizedBox(width: 12),
+          Icon(icon, color: Colors.green.shade700, size: 24),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                Text(value.isEmpty ? 'Brak informacji' : value, style: const TextStyle(fontSize: 16)),
+                Text(label.trim(), style: const TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text(value.isEmpty ? '---' : value, style: const TextStyle(fontSize: 17)),
               ],
             ),
           ),
@@ -131,46 +156,64 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
-  Widget _buildActionButtons() {
-    if (widget.userId == _currentUserId) {
+  Widget _buildActionButtons(AppLocalizations loc, bool isMe) {
+    if (isMe) {
       return SizedBox(
         width: double.infinity,
-        height: 50,
+        height: 55,
         child: ElevatedButton.icon(
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())),
           icon: const Icon(Icons.edit),
-          label: const Text('EDYTUJ MÓJ PROFIL'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryColor, foregroundColor: Colors.white),
+          label: Text(loc.translate('edit_profile').toUpperCase()),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green.shade700, 
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
+          ),
         ),
       );
     }
 
     if (_isBlocked) {
-      return ElevatedButton(onPressed: () {
-        _databaseService.unblockUser(_currentUserId, widget.userId);
-        setState(() => _isBlocked = false);
-      }, child: const Text('Odblokuj'));
+      return ElevatedButton(
+        onPressed: () {
+          _databaseService.unblockUser(_currentUserId, widget.userId);
+          setState(() => _isBlocked = false);
+        }, 
+        child: Text(loc.translate('unblock'))
+      );
     }
 
     return Column(
       children: [
         if (_isFriend)
-          ElevatedButton(onPressed: () {
-             _databaseService.removeFriend(_currentUserId, widget.userId);
-             setState(() => _isFriend = false);
-          }, child: const Text('Usuń ze znajomych'))
-        else if (_friendRequestSent)
-          const ElevatedButton(onPressed: null, child: Text('Zaproszenie wysłane'))
+          SizedBox(
+            width: double.infinity,
+            height: 55,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                 _databaseService.removeFriend(_currentUserId, widget.userId);
+                 setState(() => _isFriend = false);
+              }, 
+              icon: const Icon(Icons.person_remove),
+              label: const Text('USUŃ ZE ZNAJOMYCH'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
+            ),
+          )
         else
-          ElevatedButton(onPressed: () {
-             _databaseService.sendFriendRequest(_currentUserId, widget.userId);
-             setState(() => _friendRequestSent = true);
-          }, child: const Text('Dodaj do znajomych')),
-        const SizedBox(height: 8),
-        TextButton(onPressed: () {
-           _databaseService.blockUser(_currentUserId, widget.userId);
-           setState(() => _isBlocked = true);
-        }, child: const Text('Zablokuj użytkownika', style: TextStyle(color: Colors.red))),
+          SizedBox(
+            width: double.infinity,
+            height: 55,
+            child: ElevatedButton.icon(
+              onPressed: _friendRequestSent ? null : () {
+                 _databaseService.sendFriendRequest(_currentUserId, widget.userId);
+                 setState(() => _friendRequestSent = true);
+              }, 
+              icon: const Icon(Icons.person_add),
+              label: Text(_friendRequestSent ? 'ZAPROSZENIE WYSŁANE' : 'DODAJ DO ZNAJOMYCH'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+            ),
+          ),
       ],
     );
   }

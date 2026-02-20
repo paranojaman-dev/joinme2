@@ -1,12 +1,33 @@
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:joinme2/models/event_model.dart';
+import 'package:joinme2/models/pin_model.dart';
+import 'package:flutter/foundation.dart';
 
 class DatabaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseStorage _storage = FirebaseStorage.instance;
 
-  // --- EVENTS METHODS ---
+  // --- FCM TOKEN ---
+  Future<void> saveUserToken(String userId) async {
+    try {
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        if (kDebugMode) print("🔑 TWÓJ TOKEN FCM: $token");
+        await _firestore.collection('users').doc(userId).set({
+          'fcmToken': token,
+          'lastTokenUpdate': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (e) {
+      if (kDebugMode) print("❌ Błąd pobierania tokenu: $e");
+    }
+  }
 
+  // --- WYDARZENIA ---
   Stream<QuerySnapshot> getEvents() {
     return _firestore.collection('events').where('isActive', isEqualTo: true).snapshots();
   }
@@ -15,8 +36,10 @@ class DatabaseService {
     return _firestore.collection('events').where('isActive', isEqualTo: true).get();
   }
 
-  Future<void> createEvent(Event event) async {
-    await _firestore.collection('events').add(event.toMap());
+  Future<void> createEvent(Event event, {bool isPrivate = false}) async {
+    final Map<String, dynamic> data = event.toMap();
+    data['isPrivate'] = isPrivate;
+    await _firestore.collection('events').add(data);
   }
 
   Future<void> updateEvent(String eventId, Map<String, dynamic> data) async {
@@ -28,29 +51,9 @@ class DatabaseService {
   }
 
   Future<void> joinEvent(String eventId, String userId) async {
-    final eventDoc = await _firestore.collection('events').doc(eventId).get();
-    if (!eventDoc.exists) return;
-    
-    final eventData = eventDoc.data() as Map<String, dynamic>;
-    final String creatorId = eventData['creatorId'];
-    final String eventTitle = eventData['title'] ?? '';
-
     await _firestore.collection('events').doc(eventId).update({
       'participants': FieldValue.arrayUnion([userId])
     });
-
-    // Powiadomienie dla twórcy o nowym uczestniku
-    if (creatorId != userId) {
-      final userDoc = await getUserData(userId);
-      final userName = userDoc.exists ? (userDoc.data() as Map<String, dynamic>)['displayName'] : "Ktoś";
-      
-      await sendNotification(
-        creatorId, 
-        userId, 
-        'event_joined', 
-        extraData: {'senderName': userName, 'eventTitle': eventTitle}
-      );
-    }
   }
 
   Future<void> leaveEvent(String eventId, String userId) async {
@@ -59,137 +62,138 @@ class DatabaseService {
     });
   }
 
-  // --- USER METHODS ---
-
-  Stream<QuerySnapshot> getUsers() {
-    return _firestore.collection('users').snapshots();
+  // --- PINEZKI ---
+  Future<void> createPin(PinModel pin) async {
+    await _firestore.collection('pins').add(pin.toMap());
   }
 
-  Future<QuerySnapshot> getUsersOnce() {
-    return _firestore.collection('users').get();
+  Stream<QuerySnapshot> getPins() {
+    return _firestore.collection('pins').snapshots();
   }
 
-  Future<void> createUserDocument(User user, {String? displayName, DateTime? dateOfBirth}) async {
-    try {
-      await _firestore.collection('users').doc(user.uid).set({
-        'uid': user.uid,
-        'email': user.email,
-        'displayName': displayName ?? user.displayName ?? 'Użytkownik',
-        'dateOfBirth': dateOfBirth != null ? Timestamp.fromDate(dateOfBirth) : null,
-        'interests': [],
-        'photoURL': user.photoURL ?? '',
-        'createdAt': FieldValue.serverTimestamp(),
-        'friends': [],
-        'blockedUsers': [],
-        'isPremium': false,
-        'visibilitySettings': {
-          'showToMen': true,
-          'showToWomen': true,
-          'showToOther': true,
-          'ageRange': {'min': 18, 'max': 99}
-        },
-        'status_info': {'isOnline': true, 'lastSeen': FieldValue.serverTimestamp()},
-        'location': const GeoPoint(0, 0)
-      }, SetOptions(merge: true));
-    } catch (e) {
-      rethrow;
-    }
+  Future<QuerySnapshot> getPinsOnce() {
+    return _firestore.collection('pins').get();
+  }
+
+  Future<void> deletePin(String pinId) async {
+    await _firestore.collection('pins').doc(pinId).delete();
+  }
+
+  // --- UŻYTKOWNICY ---
+  Future<void> createUserDocument(User user, {
+    required String firstName, 
+    required String lastName, 
+    required String nickname,
+    DateTime? dateOfBirth
+  }) async {
+    await _firestore.collection('users').doc(user.uid).set({
+      'uid': user.uid,
+      'email': user.email,
+      'firstName': firstName, 
+      'lastName': lastName,   
+      'nickname': nickname,   
+      'displayName': "$firstName $lastName", 
+      'dateOfBirth': dateOfBirth != null ? Timestamp.fromDate(dateOfBirth) : null,
+      'interests': [],
+      'photoURL': user.photoURL ?? '',
+      'createdAt': FieldValue.serverTimestamp(),
+      'friends': [],
+      'blockedUsers': [],
+      'status_info': {'isOnline': true, 'lastSeen': FieldValue.serverTimestamp()},
+      'visibility': 'public',
+      'hasAcceptedTerms': false,
+    }, SetOptions(merge: true));
+    await saveUserToken(user.uid);
   }
 
   Future<DocumentSnapshot> getUserData(String uid) async {
     return await _firestore.collection('users').doc(uid).get();
   }
 
-  Future<void> updateUserProfile(String uid, Map<String, dynamic> data) async {
-    await _firestore.collection('users').doc(uid).set(data, SetOptions(merge: true));
-  }
-  
-  Future<void> updateUserStatus(String uid, bool isOnline) async {
-    await _firestore.collection('users').doc(uid).set({
-      'status_info': {
-        'isOnline': isOnline,
-        'lastSeen': FieldValue.serverTimestamp()
-        }
-    }, SetOptions(merge: true));
+  Future<QuerySnapshot> getUsersOnce() {
+    return _firestore.collection('users').get();
   }
 
-  Future<void> updateUserLocation(String uid, double lat, double lng) async {
-    try {
-      await _firestore.collection('users').doc(uid).set({
-        'location': GeoPoint(lat, lng),
-        'status_info': {'lastSeen': FieldValue.serverTimestamp()},
-      }, SetOptions(merge: true));
-    } catch (e) {
-      print('❌ Błąd aktualizacji lokalizacji: $e');
-    }
+  Future<void> updateUserProfile(String uid, Map<String, dynamic> data) async {
+    data.remove('firstName');
+    data.remove('lastName');
+    data.remove('nickname');
+    await _firestore.collection('users').doc(uid).update(data);
+  }
+
+  Future<void> updateUserStatus(String uid, bool isOnline) async {
+    await _firestore.collection('users').doc(uid).update({
+      'status_info.isOnline': isOnline,
+      'status_info.lastSeen': FieldValue.serverTimestamp()
+    });
+  }
+
+  Future<void> updateUserVisibility(String uid, String visibility) async {
+    await _firestore.collection('users').doc(uid).update({'visibility': visibility});
+  }
+
+  Future<void> updateMapStyle(String uid, String style) async {
+    await _firestore.collection('users').doc(uid).update({'mapStyle': style});
+  }
+
+  Future<void> markTermsAsAccepted(String uid) async {
+    await _firestore.collection('users').doc(uid).update({'hasAcceptedTerms': true});
   }
 
   Future<void> deleteAccount(String uid) async {
-    await _firestore.collection('users').doc(uid).delete();
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      final String? userEmail = user?.email;
+
+      final batch = _firestore.batch();
+      
+      batch.delete(_firestore.collection('users').doc(uid));
+      
+      final createdEvents = await _firestore.collection('events').where('creatorId', isEqualTo: uid).get();
+      for (var doc in createdEvents.docs) batch.delete(doc.reference);
+      
+      final joinedEvents = await _firestore.collection('events').where('participants', arrayContains: uid).get();
+      for (var doc in joinedEvents.docs) {
+        batch.update(doc.reference, {'participants': FieldValue.arrayRemove([uid])});
+      }
+      
+      final sentReq = await _firestore.collection('friend_requests').where('from', isEqualTo: uid).get();
+      for (var doc in sentReq.docs) batch.delete(doc.reference);
+      final recReq = await _firestore.collection('friend_requests').where('to', isEqualTo: uid).get();
+      for (var doc in recReq.docs) batch.delete(doc.reference);
+      
+      final userPins = await _firestore.collection('pins').where('creatorId', isEqualTo: uid).get();
+      for (var doc in userPins.docs) batch.delete(doc.reference);
+
+      final userChats = await _firestore.collection('chats').where('users', arrayContains: uid).get();
+      for (var chatDoc in userChats.docs) {
+        final messages = await chatDoc.reference.collection('messages').get();
+        for (var msg in messages.docs) batch.delete(msg.reference);
+        batch.delete(chatDoc.reference);
+      }
+
+      final notifications = await _firestore.collection('users').doc(uid).collection('notifications').get();
+      for (var doc in notifications.docs) batch.delete(doc.reference);
+
+      await batch.commit();
+
+      if (user != null && user.uid == uid) {
+        await user.delete();
+        if (kDebugMode) print("Konto $userEmail usunięte.");
+      }
+    } catch (e) {
+      if (kDebugMode) print("⚠️ Błąd usuwania konta: $e");
+      await FirebaseAuth.instance.signOut();
+    }
   }
 
-  Future<void> updateMapStyle(String uid, String styleName) async {
-    await _firestore.collection('users').doc(uid).set({
-      'mapStyle': styleName,
-    }, SetOptions(merge: true));
-  }
-
-  // --- NOTIFICATIONS ---
-
-  Stream<QuerySnapshot> getNotifications(String userId) {
-    return _firestore
-        .collection('users')
-        .doc(userId)
-        .collection('notifications')
-        .orderBy('timestamp', descending: true)
-        .snapshots();
-  }
-
-  Future<void> markNotificationAsRead(String userId, String notificationId) async {
-    await _firestore
-        .collection('users')
-        .doc(userId)
-        .collection('notifications')
-        .doc(notificationId)
-        .update({'read': true});
-  }
-
-  Future<void> sendNotification(String toUserId, String fromUserId, String type, {Map<String, dynamic>? extraData}) async {
-    await _firestore.collection('users').doc(toUserId).collection('notifications').add({
-      'type': type,
-      'from': fromUserId,
-      'timestamp': FieldValue.serverTimestamp(),
-      'read': false,
-      'extraData': extraData,
-    });
-  }
-
-  // --- FRIENDS & RELATIONSHIPS ---
-
-  Stream<QuerySnapshot> getFriendRequests(String userId) {
-    return _firestore
-        .collection('friend_requests')
-        .where('to', isEqualTo: userId)
-        .where('status', isEqualTo: 'pending')
-        .snapshots();
-  }
-
-  Future<void> acceptFriendRequest(String requestId, String fromUserId, String toUserId) async {
-    await _firestore.collection('users').doc(toUserId).update({
-      'friends': FieldValue.arrayUnion([fromUserId])
-    });
-    await _firestore.collection('users').doc(fromUserId).update({
-      'friends': FieldValue.arrayUnion([toUserId])
-    });
-    await _firestore.collection('friend_requests').doc(requestId).delete();
-  }
-
-  Future<void> declineFriendRequest(String requestId) async {
-    await _firestore.collection('friend_requests').doc(requestId).delete();
-  }
-
+  // --- ZNAJOMI I BLOKOWANIE ---
   Stream<DocumentSnapshot> getFriends(String userId) {
     return _firestore.collection('users').doc(userId).snapshots();
+  }
+
+  Stream<QuerySnapshot> getFriendRequests(String userId) {
+    return _firestore.collection('friend_requests').where('to', isEqualTo: userId).where('status', isEqualTo: 'pending').snapshots();
   }
 
   Future<void> sendFriendRequest(String fromUserId, String toUserId) async {
@@ -202,41 +206,36 @@ class DatabaseService {
     await sendNotification(toUserId, fromUserId, 'friend_request');
   }
 
-  Future<void> blockUser(String userId, String blockedUserId) async {
-    await _firestore.collection('users').doc(userId).update({
-      'blockedUsers': FieldValue.arrayUnion([blockedUserId])
-    });
+  Future<void> acceptFriendRequest(String requestId, String fromUid, String toUid) async {
+    await _firestore.collection('users').doc(toUid).update({'friends': FieldValue.arrayUnion([fromUid])});
+    await _firestore.collection('users').doc(fromUid).update({'friends': FieldValue.arrayUnion([toUid])});
+    await _firestore.collection('friend_requests').doc(requestId).delete();
   }
 
-  Future<void> unblockUser(String userId, String blockedUserId) async {
-    await _firestore.collection('users').doc(blockedUserId).update({
-      'blockedUsers': FieldValue.arrayRemove([blockedUserId])
-    });
+  Future<void> declineFriendRequest(String requestId) async {
+    await _firestore.collection('friend_requests').doc(requestId).delete();
   }
 
   Future<void> removeFriend(String userId, String friendId) async {
-    await _firestore.collection('users').doc(userId).update({
-      'friends': FieldValue.arrayRemove([friendId])
-    });
-    await _firestore.collection('users').doc(friendId).update({
-      'friends': FieldValue.arrayRemove([userId])
-    });
+    await _firestore.collection('users').doc(userId).update({'friends': FieldValue.arrayRemove([friendId])});
+    await _firestore.collection('users').doc(friendId).update({'friends': FieldValue.arrayRemove([userId])});
   }
 
-  Future<QuerySnapshot> getFilteredUsers(Map<String, dynamic> filters) {
-    return _firestore.collection('users').get();
+  Future<void> blockUser(String userId, String blockedId) async {
+    await _firestore.collection('users').doc(userId).update({'blockedUsers': FieldValue.arrayUnion([blockedId])});
   }
 
-  // --- CHAT METHODS ---
+  Future<void> unblockUser(String userId, String blockedId) async {
+    await _firestore.collection('users').doc(userId).update({'blockedUsers': FieldValue.arrayRemove([blockedId])});
+  }
 
+  // --- CZAT ---
   Future<String> getOrCreateChat(String userId1, String userId2) async {
     String chatId = userId1.hashCode <= userId2.hashCode ? '$userId1-$userId2' : '$userId2-$userId1';
-    final chatDoc = _firestore.collection('chats').doc(chatId);
-    final docSnapshot = await chatDoc.get();
-    if (!docSnapshot.exists) {
-      await chatDoc.set({
+    final doc = await _firestore.collection('chats').doc(chatId).get();
+    if (!doc.exists) {
+      await _firestore.collection('chats').doc(chatId).set({
         'users': [userId1, userId2],
-        'lastMessage': null,
         'timestamp': FieldValue.serverTimestamp(),
       });
     }
@@ -244,52 +243,47 @@ class DatabaseService {
   }
 
   Stream<QuerySnapshot> getChatMessages(String chatId) {
-    return _firestore
-        .collection('chats')
-        .doc(chatId)
-        .collection('messages')
-        .where('expiresAt', isGreaterThan: Timestamp.now())
-        .orderBy('expiresAt')
-        .snapshots();
-  }
-  
-  Stream<QuerySnapshot> getChatMessagesWithCleanup(String chatId) {
-    return _firestore
-        .collection('chats')
-        .doc(chatId)
-        .collection('messages')
-        .orderBy('timestamp', descending: true)
-        .snapshots();
+    return _firestore.collection('chats').doc(chatId).collection('messages').orderBy('timestamp', descending: true).snapshots();
   }
 
-  Future<void> sendMessage(String chatId, String senderId, String text, {Duration? expireDuration}) async {
+  Future<void> sendMessage(String chatId, String senderId, String? text, {String? imageUrl, Duration? expireDuration}) async {
     final now = DateTime.now();
     final expiresAt = expireDuration != null ? now.add(expireDuration) : now.add(const Duration(days: 365 * 10));
 
-    final messageData = {
+    final msg = {
       'senderId': senderId,
       'text': text,
+      'imageUrl': imageUrl,
       'timestamp': FieldValue.serverTimestamp(),
       'expiresAt': Timestamp.fromDate(expiresAt),
     };
-    
-    await _firestore.collection('chats').doc(chatId).collection('messages').add(messageData);
-    await _firestore.collection('chats').doc(chatId).update({
-      'lastMessage': messageData,
-    });
+    await _firestore.collection('chats').doc(chatId).collection('messages').add(msg);
+    await _firestore.collection('chats').doc(chatId).update({'lastMessage': msg});
+  }
 
-    final chatDoc = await _firestore.collection('chats').doc(chatId).get();
-    final List<dynamic> userIds = List.from(chatDoc.data()?['users'] ?? []);
-    
-    for (String uid in userIds) {
-      if (uid == senderId && userIds.length > 1 && userIds[0] != userIds[1]) continue; 
-      
-      final senderDoc = await getUserData(senderId);
-      final senderName = senderDoc.exists ? (senderDoc.data() as Map<String, dynamic>)['displayName'] : "Ktoś";
-      
-      await sendNotification(uid, senderId, 'new_message', extraData: {'text': text, 'senderName': senderName});
-      
-      if (userIds.length > 1 && userIds[0] != userIds[1]) break;
-    }
+  Future<String> uploadChatImage(File file, String chatId) async {
+    String name = DateTime.now().millisecondsSinceEpoch.toString();
+    var ref = _storage.ref().child('chats/$chatId/$name');
+    await ref.putFile(file);
+    return await ref.getDownloadURL();
+  }
+
+  // --- POWIADOMIENIA ---
+  Stream<QuerySnapshot> getNotifications(String userId) {
+    return _firestore.collection('users').doc(userId).collection('notifications').orderBy('timestamp', descending: true).snapshots();
+  }
+
+  Future<void> markNotificationAsRead(String userId, String notificationId) async {
+    await _firestore.collection('users').doc(userId).collection('notifications').doc(notificationId).update({'read': true});
+  }
+
+  Future<void> sendNotification(String toUserId, String fromUserId, String type, {Map<String, dynamic>? extraData}) async {
+    await _firestore.collection('users').doc(toUserId).collection('notifications').add({
+      'type': type,
+      'from': fromUserId,
+      'timestamp': FieldValue.serverTimestamp(),
+      'read': false,
+      'extraData': extraData,
+    });
   }
 }

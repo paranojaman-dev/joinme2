@@ -1,7 +1,7 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:joinme2/screens/main_screen.dart';
 import 'package:joinme2/services/database_service.dart';
 import 'package:joinme2/utils/app_localizations.dart';
 import '../utils/constants.dart';
@@ -13,119 +13,110 @@ class AuthScreen extends StatefulWidget {
   State<AuthScreen> createState() => _AuthScreenState();
 }
 
+enum AuthMode { login, registerTerms, registerProfile, waitingForVerification }
+
 class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _nameController = TextEditingController();
-  final _dobController = TextEditingController();
-  DateTime? _selectedDate;
-  String? _selectedGender;
-  bool _isLogin = true;
+  AuthMode _currentMode = AuthMode.login;
   bool _isLoading = false;
   bool _isPasswordVisible = false;
+  bool _termsAccepted = false;
+  Timer? _verificationTimer;
+
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
+  final _nicknameController = TextEditingController();
+  final _dobController = TextEditingController();
+  
+  DateTime? _selectedDate;
+  String? _selectedGender;
+  
   final _auth = FirebaseAuth.instance;
   final _dbService = DatabaseService();
 
-  void _showErrorDialog(String message, {bool showResendButton = false, User? user}) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Wystąpił błąd'),
-        content: Text(message),
-        actions: <Widget>[
-          if (showResendButton && user != null)
-            TextButton(
-              child: const Text('Wyślij ponownie'),
-              onPressed: () async {
-                try {
-                  await user.sendEmailVerification();
-                  Navigator.of(ctx).pop();
-                  _showVerificationDialog(resent: true);
-                } on FirebaseAuthException catch (e) {
-                  Navigator.of(ctx).pop();
-                  _showErrorDialog(e.message ?? 'Nie udało się wysłać e-maila.');
-                }
-              },
-            ),
-          TextButton(
-            child: const Text('OK'),
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              if (showResendButton) {
-                _auth.signOut();
-              }
-            },
-          )
-        ],
-      ),
-    );
+  @override
+  void initState() {
+    super.initState();
+    final user = _auth.currentUser;
+    if (user != null && !user.emailVerified) {
+      _currentMode = AuthMode.waitingForVerification;
+      _startVerificationCheck();
+    }
   }
 
-  Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+  @override
+  void dispose() {
+    _verificationTimer?.cancel();
+    super.dispose();
+  }
 
-    setState(() {
-      _isLoading = true;
+  void _startVerificationCheck() {
+    _verificationTimer?.cancel();
+    _verificationTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      final user = _auth.currentUser;
+      if (user != null) {
+        try {
+          await user.reload();
+          if (user.emailVerified) {
+            timer.cancel();
+            if (mounted) setState(() {}); // Odświeżenie wymusi przejście przez AuthWrapper
+          }
+        } catch (e) {
+          // Ignorujemy błędy sieciowe w tle
+        }
+      }
     });
+  }
 
-    try {
-      if (_isLogin) {
-        await _auth.signInWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        );
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MainScreen()),
-        );
-      } else {
-        final userCredential = await _auth.createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        );
-
-        await _dbService.createUserDocument(
-          userCredential.user!,
-          displayName: _nameController.text,
-          dateOfBirth: _selectedDate,
-        );
-        // Save gender during creation
-        await _dbService.updateUserProfile(userCredential.user!.uid, {'gender': _selectedGender});
-        
-        await userCredential.user!.sendEmailVerification();
-        _showVerificationDialog();
-      }
-    } on FirebaseAuthException catch (e) {
-      String errorMessage = 'Wystąpił nieznany błąd.';
-      if (e.code == 'user-not-found' || e.code == 'wrong-password' || e.code == 'invalid-credential') {
-        errorMessage = 'E-mail lub hasło nieprawidłowe.';
-      }
-      _showErrorDialog(errorMessage);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+  Future<void> _manualCheckStatus() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      setState(() => _isLoading = true);
+      try {
+        await user.reload();
+        if (user.emailVerified) {
+          if (mounted) setState(() {});
+        } else {
+          final loc = AppLocalizations.of(context)!;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(loc.translate('email_verification'))),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
       }
     }
   }
 
-  void _showVerificationDialog({bool resent = false}) {
+  void _showErrorDialog(String message) {
+    final loc = AppLocalizations.of(context)!;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(resent ? 'E-mail wysłany ponownie' : 'Weryfikacja E-mail'),
-        content: const Text('Link weryfikacyjny został wysłany na Twój adres e-mail. Proszę potwierdzić, aby móc się zalogować.'),
+        title: Text(loc.translate('error')),
+        content: Text(message),
+        actions: [TextButton(child: const Text('OK'), onPressed: () => Navigator.of(ctx).pop())],
+      ),
+    );
+  }
+
+  void _showCreateAccountPrompt() {
+    final loc = AppLocalizations.of(context)!;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(loc.translate('account_not_found')),
+        content: Text(loc.translate('ask_create_account')),
         actions: [
+          TextButton(child: Text(loc.translate('no')), onPressed: () => Navigator.of(ctx).pop()),
           TextButton(
-            child: const Text('OK'),
+            child: Text(loc.translate('yes')),
             onPressed: () {
               Navigator.of(ctx).pop();
-              if (!resent) {
-                setState(() {
-                  _isLogin = true;
-                });
-              }
+              setState(() => _currentMode = AuthMode.registerTerms);
             },
           ),
         ],
@@ -133,27 +124,101 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  Future<void> _resetPassword() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      _showErrorDialog('Wprowadź poprawny adres e-mail, aby zresetować hasło.');
-      return;
-    }
+  void _showLoginPrompt() {
+    final loc = AppLocalizations.of(context)!;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(loc.translate('account_already_exists')),
+        content: Text(loc.translate('ask_login_instead')),
+        actions: [
+          TextButton(child: Text(loc.translate('no')), onPressed: () => Navigator.of(ctx).pop()),
+          TextButton(
+            child: Text(loc.translate('yes')),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() => _currentMode = AuthMode.login);
+            },
+          ),
+        ],
+      ),
+    );
+  }
 
-    try {
-      await _auth.sendPasswordResetEmail(email: email);
-      showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-              title: const Text('Wysłano link do resetowania hasła'),
-              content: const Text('Sprawdź swoją skrzynkę mailową.'),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    child: const Text('OK'))
-              ]));
-    } on FirebaseAuthException catch (e) {
-      _showErrorDialog(e.message ?? 'Wystąpił nieznany błąd');
+  Future<void> _handleAuth() async {
+    final loc = AppLocalizations.of(context)!;
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (_currentMode == AuthMode.login) {
+      if (!_formKey.currentState!.validate()) return;
+      setState(() => _isLoading = true);
+      try {
+        await _auth.signInWithEmailAndPassword(email: email, password: password);
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'user-not-found') {
+          _showCreateAccountPrompt();
+        } else if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+          // Próbujemy upewnić się czy mail istnieje
+          try {
+            final methods = await _auth.fetchSignInMethodsForEmail(email);
+            if (methods.isEmpty) {
+              _showCreateAccountPrompt();
+            } else {
+              _showErrorDialog(loc.translate('invalid_credentials'));
+            }
+          } catch (_) {
+            _showErrorDialog(loc.translate('invalid_credentials'));
+          }
+        } else {
+          _showErrorDialog(loc.translate('unknown_error'));
+        }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    } 
+    else if (_currentMode == AuthMode.registerTerms) {
+      if (!_termsAccepted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(loc.translate('accept_terms'))));
+        return;
+      }
+      setState(() => _currentMode = AuthMode.registerProfile);
+    } 
+    else if (_currentMode == AuthMode.registerProfile) {
+      if (!_formKey.currentState!.validate() || _selectedDate == null || _selectedGender == null) {
+        _showErrorDialog(loc.translate('provide_all_data'));
+        return;
+      }
+
+      setState(() => _isLoading = true);
+      try {
+        final userCredential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
+
+        await _dbService.createUserDocument(
+          userCredential.user!,
+          firstName: _firstNameController.text.trim(),
+          lastName: _lastNameController.text.trim(),
+          nickname: _nicknameController.text.trim(),
+          dateOfBirth: _selectedDate,
+        );
+        await _dbService.updateUserProfile(userCredential.user!.uid, {
+          'gender': _selectedGender,
+          'hasAcceptedTerms': true,
+        });
+
+        await userCredential.user!.sendEmailVerification();
+        setState(() => _currentMode = AuthMode.waitingForVerification);
+        _startVerificationCheck();
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          _showLoginPrompt();
+        } else {
+          _showErrorDialog(loc.translate('unknown_error'));
+        }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -164,7 +229,7 @@ class _AuthScreenState extends State<AuthScreen> {
       firstDate: DateTime(1920),
       lastDate: DateTime.now().subtract(const Duration(days: 365 * 18)),
     );
-    if (pickedDate != null && pickedDate != _selectedDate) {
+    if (pickedDate != null) {
       setState(() {
         _selectedDate = pickedDate;
         _dobController.text = DateFormat('dd/MM/yyyy').format(pickedDate);
@@ -174,7 +239,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context);
+    final loc = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: AppColors.backgroundColor,
       body: SafeArea(
@@ -186,110 +251,39 @@ class _AuthScreenState extends State<AuthScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 40),
-                  Text(
-                    _isLogin ? 'Witaj z powrotem!' : 'Dołącz do JoinMe',
-                    style: const TextStyle(
-                      color: AppColors.textColor,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _isLogin ? 'Zaloguj się do swojego konta' : 'Stwórz nowe konto',
-                    style: const TextStyle(
-                      color: Color(0xFF757575),
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-                  if (!_isLogin) ...[
-                    TextFormField(
-                      controller: _nameController,
-                      decoration: const InputDecoration(labelText: 'Imię'),
-                      validator: (value) => value!.isEmpty ? 'Podaj swoje imię' : null,
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _dobController,
-                      decoration: const InputDecoration(labelText: 'Data urodzenia'),
-                      readOnly: true,
-                      onTap: _pickDate,
-                      validator: (value) => value!.isEmpty ? 'Podaj datę urodzenia' : null,
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      value: _selectedGender,
-                      decoration: const InputDecoration(labelText: 'Płeć'),
-                      items: [
-                        {'val': 'Mężczyzna', 'key': 'male'},
-                        {'val': 'Kobieta', 'key': 'female'},
-                        {'val': 'Inna', 'key': 'other_gender'}
-                      ].map((item) {
-                        return DropdownMenuItem<String>(
-                          value: item['val'],
-                          child: Text(loc?.translate(item['key']!) ?? item['val']!),
-                        );
-                      }).toList(),
-                      onChanged: (val) => setState(() => _selectedGender = val),
-                      validator: (val) => val == null ? 'Wybierz płeć' : null,
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(labelText: 'Email'),
-                    keyboardType: TextInputType.emailAddress,
-                    validator: (value) =>
-                        (value!.isEmpty || !value.contains('@')) ? 'Podaj poprawny adres email' : null,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _passwordController,
-                    decoration: InputDecoration(
-                      labelText: 'Hasło',
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _isPasswordVisible = !_isPasswordVisible;
-                          });
-                        },
-                      ),
-                    ),
-                    obscureText: !_isPasswordVisible,
-                    validator: (value) =>
-                        (value!.length < 6) ? 'Hasło musi mieć co najmniej 6 znaków' : null,
-                  ),
+                  const SizedBox(height: 20),
+                  Center(child: Icon(Icons.chair, color: Colors.green.shade700, size: 60)),
+                  const SizedBox(height: 20),
+                  
+                  if (_currentMode == AuthMode.login) ..._buildLoginFields(loc),
+                  if (_currentMode == AuthMode.registerTerms) ..._buildTermsStep(loc),
+                  if (_currentMode == AuthMode.registerProfile) ..._buildProfileFields(loc),
+                  if (_currentMode == AuthMode.waitingForVerification) ..._buildWaitingStep(loc),
+
                   const SizedBox(height: 24),
                   if (_isLoading)
                     const Center(child: CircularProgressIndicator())
-                  else
+                  else if (_currentMode != AuthMode.waitingForVerification)
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _submit,
-                        child: Text(_isLogin ? 'Zaloguj się' : 'Zarejestruj się'),
+                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)),
+                        onPressed: _handleAuth,
+                        child: Text(_getButtonText(loc).toUpperCase()),
                       ),
                     ),
-                  if (_isLogin)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: _resetPassword,
-                        child: const Text('Nie pamiętasz hasła?'),
-                      ),
-                    ),
-                  const SizedBox(height: 20),
-                  Center(
-                    child: TextButton(
-                      onPressed: () => setState(() => _isLogin = !_isLogin),
-                      child: Text(_isLogin ? 'Nie masz konta? Zarejestruj się' : 'Masz już konto? Zaloguj się'),
-                    ),
-                  ),
+                  
+                  if (_currentMode != AuthMode.login)
+                    Center(child: TextButton(
+                      onPressed: () async {
+                        await _auth.signOut();
+                        setState(() {
+                          _verificationTimer?.cancel();
+                          _currentMode = AuthMode.login;
+                        });
+                      }, 
+                      child: Text(loc.translate('back'))
+                    )),
                 ],
               ),
             ),
@@ -297,5 +291,101 @@ class _AuthScreenState extends State<AuthScreen> {
         ),
       ),
     );
+  }
+
+  List<Widget> _buildLoginFields(AppLocalizations loc) {
+    return [
+      Text(loc.translate('welcome_back'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 8),
+      Text(loc.translate('login_subtitle'), style: const TextStyle(color: Colors.grey)),
+      const SizedBox(height: 30),
+      TextFormField(
+        controller: _emailController,
+        decoration: InputDecoration(labelText: loc.translate('email')),
+        validator: (v) => (v!.isEmpty || !v.contains('@')) ? loc.translate('provide_email') : null,
+      ),
+      const SizedBox(height: 16),
+      TextFormField(
+        controller: _passwordController,
+        decoration: InputDecoration(
+          labelText: loc.translate('password'),
+          suffixIcon: IconButton(
+            icon: Icon(_isPasswordVisible ? Icons.visibility : Icons.visibility_off),
+            onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+          ),
+        ),
+        obscureText: !_isPasswordVisible,
+        validator: (v) => (v!.length < 6) ? loc.translate('password_too_short') : null,
+      ),
+    ];
+  }
+
+  List<Widget> _buildTermsStep(AppLocalizations loc) {
+    return [
+      Text(loc.translate('legal_info'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 20),
+      Text(loc.translate('terms_body'), style: const TextStyle(color: Colors.grey)),
+      const SizedBox(height: 20),
+      CheckboxListTile(
+        title: Text(loc.translate('accept_terms'), style: const TextStyle(fontSize: 14)),
+        value: _termsAccepted,
+        onChanged: (v) => setState(() => _termsAccepted = v!),
+        activeColor: Colors.green,
+      ),
+    ];
+  }
+
+  List<Widget> _buildProfileFields(AppLocalizations loc) {
+    return [
+      Text(loc.translate('signup_subtitle'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 20),
+      TextFormField(controller: _firstNameController, decoration: InputDecoration(labelText: loc.translate('first_name'))),
+      const SizedBox(height: 12),
+      TextFormField(controller: _lastNameController, decoration: InputDecoration(labelText: loc.translate('last_name'))),
+      const SizedBox(height: 12),
+      TextFormField(controller: _nicknameController, decoration: InputDecoration(labelText: loc.translate('nickname'))),
+      const SizedBox(height: 12),
+      TextFormField(
+        controller: _dobController,
+        readOnly: true,
+        onTap: _pickDate,
+        decoration: InputDecoration(labelText: loc.translate('date_of_birth'), suffixIcon: const Icon(Icons.calendar_today)),
+      ),
+      const SizedBox(height: 12),
+      DropdownButtonFormField<String>(
+        dropdownColor: Colors.grey.shade900,
+        value: _selectedGender,
+        decoration: InputDecoration(labelText: loc.translate('gender')),
+        items: ['male', 'female', 'other_gender'].map((key) => DropdownMenuItem(value: key, child: Text(loc.translate(key)))).toList(),
+        onChanged: (val) => setState(() => _selectedGender = val),
+      ),
+    ];
+  }
+
+  List<Widget> _buildWaitingStep(AppLocalizations loc) {
+    return [
+      const Center(child: Icon(Icons.mark_email_read, color: Colors.green, size: 80)),
+      const SizedBox(height: 24),
+      Center(child: Text(loc.translate('email_verification'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold))),
+      const SizedBox(height: 16),
+      Text(loc.translate('verification_sent_body'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+      const SizedBox(height: 30),
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: _manualCheckStatus,
+          child: const Text("ODŚWIEŻ STATUS"),
+        ),
+      ),
+    ];
+  }
+
+  String _getButtonText(AppLocalizations loc) {
+    switch (_currentMode) {
+      case AuthMode.login: return loc.translate('login');
+      case AuthMode.registerTerms: return loc.translate('next');
+      case AuthMode.registerProfile: return loc.translate('signup');
+      default: return "";
+    }
   }
 }

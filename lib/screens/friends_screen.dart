@@ -45,40 +45,25 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
           ],
         ),
       ),
-      body: Stack(
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          // SUBTELNE LOGO W TLE (10% Widoczności)
-          Positioned.fill(
-            child: Opacity(
-              opacity: 0.10,
-              child: Center(child: Icon(Icons.chair, size: 300, color: Colors.green.shade400)),
-            ),
-          ),
-          TabBarView(
-            controller: _tabController,
-            children: [
-              _buildFriendsList(),
-              _buildFriendRequestsList(),
-              _buildBlockedUsersList(),
-            ],
-          ),
+          _buildFriendsList(loc),
+          _buildFriendRequestsList(loc),
+          _buildBlockedUsersList(loc),
         ],
       ),
     );
   }
 
-  Widget _buildFriendsList() {
-    final loc = AppLocalizations.of(context)!;
+  Widget _buildFriendsList(AppLocalizations loc) {
     return StreamBuilder<DocumentSnapshot>(
       stream: _databaseService.getFriends(_currentUserId),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (!snapshot.hasData || !snapshot.data!.exists || snapshot.data!.data() == null) {
-          return Center(child: Text(loc.translate('profile_save_error')));
-        }
-        final userData = snapshot.data!.data() as Map<String, dynamic>;
+        if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator());
+        final userData = snapshot.data!.data() as Map<String, dynamic>?;
+        if (userData == null) return const SizedBox.shrink();
+        
         final List<dynamic> friendIds = userData['friends'] ?? [];
 
         return ListView.builder(
@@ -90,33 +75,26 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
             return FutureBuilder<DocumentSnapshot>(
               future: _databaseService.getUserData(targetUid),
               builder: (context, userSnapshot) {
-                if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
-                  return ListTile(title: Text(loc.translate('loading')));
-                }
-                final data = userSnapshot.data!.data() as Map<String, dynamic>;
-                final photoURL = data['photoURL'] as String?;
-                final displayName = data['displayName'] as String? ?? '...';
+                if (!userSnapshot.hasData || !userSnapshot.data!.exists) return const SizedBox.shrink();
+                
+                final data = userSnapshot.data!.data() as Map<String, dynamic>?;
+                if (data == null) return const SizedBox.shrink();
 
                 return ListTile(
                   leading: CircleAvatar(
-                    backgroundImage: (photoURL != null && photoURL.isNotEmpty)
-                        ? NetworkImage(photoURL)
+                    backgroundImage: (data['photoURL'] != null && data['photoURL'].toString().isNotEmpty)
+                        ? NetworkImage(data['photoURL'])
                         : null,
-                    child: (photoURL == null || photoURL.isEmpty)
+                    child: (data['photoURL'] == null || data['photoURL'].toString().isEmpty)
                         ? const Icon(Icons.person)
                         : null,
                   ),
-                  title: Text(isMe ? "$displayName (${loc.translate('saved_messages')})" : displayName),
+                  title: Text(isMe ? "${data['displayName']} (${loc.translate('saved_messages')})" : (data['displayName'] ?? '...')),
                   onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ChatScreen(
-                          peerId: targetUid,
-                          peerName: isMe ? loc.translate('saved_messages') : displayName,
-                        ),
-                      ),
-                    );
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => ChatScreen(
+                      peerId: targetUid,
+                      peerName: isMe ? loc.translate('saved_messages') : (data['displayName'] ?? '...'),
+                    )));
                   },
                 );
               },
@@ -127,44 +105,33 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildFriendRequestsList() {
-    final loc = AppLocalizations.of(context)!;
+  Widget _buildFriendRequestsList(AppLocalizations loc) {
     return StreamBuilder<QuerySnapshot>(
       stream: _databaseService.getFriendRequests(_currentUserId),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         final requests = snapshot.data!.docs;
-
-        if (requests.isEmpty) {
-          return Center(child: Text(loc.translate('no_requests')));
-        }
+        if (requests.isEmpty) return Center(child: Text(loc.translate('no_requests')));
 
         return ListView.builder(
           itemCount: requests.length,
           itemBuilder: (context, index) {
             final request = requests[index];
-            final fromUserId = request['from'];
-
+            final fromUid = request['from'];
             return FutureBuilder<DocumentSnapshot>(
-              future: _databaseService.getUserData(fromUserId),
-              builder: (context, userSnapshot) {
-                if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
-                  return ListTile(title: Text(loc.translate('loading')));
-                }
-                final senderData = userSnapshot.data!.data() as Map<String, dynamic>;
+              future: _databaseService.getUserData(fromUid),
+              builder: (context, userSnap) {
+                if (!userSnap.hasData || !userSnap.data!.exists) return const SizedBox.shrink();
+                final sender = userSnap.data!.data() as Map<String, dynamic>?;
+                if (sender == null) return const SizedBox.shrink();
+
                 return ListTile(
-                  title: Text("${loc.translate('friend_req_from')} ${senderData['displayName'] ?? '...'}"),
+                  title: Text("${loc.translate('friend_req_from')} ${sender['displayName']}"),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.check, color: Colors.green),
-                        onPressed: () => _databaseService.acceptFriendRequest(request.id, fromUserId, _currentUserId),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        onPressed: () => _databaseService.declineFriendRequest(request.id),
-                      ),
+                      IconButton(icon: const Icon(Icons.check, color: Colors.green), onPressed: () => _databaseService.acceptFriendRequest(request.id, fromUid, _currentUserId)),
+                      IconButton(icon: const Icon(Icons.close, color: Colors.red), onPressed: () => _databaseService.declineFriendRequest(request.id)),
                     ],
                   ),
                 );
@@ -176,37 +143,28 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildBlockedUsersList() {
-    final loc = AppLocalizations.of(context)!;
+  Widget _buildBlockedUsersList(AppLocalizations loc) {
     return StreamBuilder<DocumentSnapshot>(
       stream: _databaseService.getFriends(_currentUserId),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (!snapshot.hasData || !snapshot.data!.exists || snapshot.data!.data() == null) {
-          return Center(child: Text(loc.translate('profile_save_error')));
-        }
-        final userData = snapshot.data!.data() as Map<String, dynamic>;
-        final List<dynamic> blockedIds = userData['blockedUsers'] ?? [];
-
-        if (blockedIds.isEmpty) {
-          return Center(child: Text(loc.translate('no_blocked')));
-        }
+        if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator());
+        final userData = snapshot.data!.data() as Map<String, dynamic>?;
+        final List<dynamic> blockedIds = userData?['blockedUsers'] ?? [];
+        if (blockedIds.isEmpty) return Center(child: Text(loc.translate('no_blocked')));
 
         return ListView.builder(
           itemCount: blockedIds.length,
           itemBuilder: (context, index) {
             return FutureBuilder<DocumentSnapshot>(
               future: _databaseService.getUserData(blockedIds[index]),
-              builder: (context, userSnapshot) {
-                if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
-                  return ListTile(title: Text(loc.translate('loading')));
-                }
-                final blockedUserData = userSnapshot.data!.data() as Map<String, dynamic>;
+              builder: (context, userSnap) {
+                if (!userSnap.hasData || !userSnap.data!.exists) return const SizedBox.shrink();
+                final blocked = userSnap.data!.data() as Map<String, dynamic>?;
+                if (blocked == null) return const SizedBox.shrink();
+
                 return ListTile(
-                  title: Text(blockedUserData['displayName'] ?? '...'),
-                  trailing: ElevatedButton(
+                  title: Text(blocked['displayName'] ?? '...'),
+                  trailing: TextButton(
                     child: Text(loc.translate('unblock')),
                     onPressed: () => _databaseService.unblockUser(_currentUserId, blockedIds[index]),
                   ),

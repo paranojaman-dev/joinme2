@@ -1,20 +1,24 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class NotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 
   static Future<void> initialize() async {
-    // Prośba o uprawnienia (ważne dla iOS i nowszych Androidów)
+    var status = await Permission.notification.status;
+    if (!status.isGranted) {
+      await Permission.notification.request();
+    }
+
     await _messaging.requestPermission(
       alert: true,
       badge: true,
       sound: true,
     );
 
-    // Konfiguracja powiadomień lokalnych
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/launcher_icon');
     
@@ -23,33 +27,58 @@ class NotificationService {
       iOS: DarwinInitializationSettings(),
     );
 
-    await _localNotifications.initialize(initializationSettings);
+    await _localNotifications.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (details) {
+        debugPrint("Kliknięto w powiadomienie!");
+      },
+    );
 
-    // Obsługa powiadomień gdy aplikacja jest włączona (foreground)
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       _showLocalNotification(message);
     });
   }
 
   static void _showLocalNotification(RemoteMessage message) async {
+    showSimpleNotification(
+      title: message.notification?.title ?? "JoinMe",
+      body: message.notification?.body ?? "",
+      payload: message.data.toString(),
+    );
+  }
+
+  // Nowa uniwersalna metoda do wyświetlania powiadomień
+  static Future<void> showSimpleNotification({
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'high_importance_channel',
       'High Importance Notifications',
+      channelDescription: 'Ważne powiadomienia JoinMe',
       importance: Importance.max,
       priority: Priority.high,
+      showWhen: true,
+      icon: '@mipmap/launcher_icon',
     );
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
-      message.hashCode,
-      message.notification?.title ?? "JoinMe",
-      message.notification?.body ?? "",
+      DateTime.now().millisecond, // Unikalne ID
+      title,
+      body,
       platformDetails,
+      payload: payload,
     );
   }
 
   static Future<String?> getToken() async {
-    return await _messaging.getToken();
+    try {
+      return await _messaging.getToken();
+    } catch (e) {
+      return null;
+    }
   }
 }
