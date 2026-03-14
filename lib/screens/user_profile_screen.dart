@@ -59,6 +59,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     return age;
   }
 
+  String _getGenderTranslation(String? gender, AppLocalizations loc) {
+    if (gender == null) return '---';
+    String g = gender.toLowerCase();
+    if (g == 'male' || g == 'mężczyzna') return loc.translate('male');
+    if (g == 'female' || g == 'kobieta') return loc.translate('female');
+    return loc.translate('other_gender');
+  }
+
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
@@ -66,11 +74,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isMe ? loc.translate('profile') : loc.translate('app_title')),
+        title: Text(isMe ? loc.translate('profile') : loc.translate('join_me_title')),
       ),
       body: Stack(
         children: [
-          // SUBTELNE LOGO W TLE (10% Widoczności)
           Positioned.fill(
             child: Opacity(
               opacity: 0.10,
@@ -106,6 +113,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     const SizedBox(height: 8),
                     Text(user.dateOfBirth != null ? '${_calculateAge(user.dateOfBirth!)} ${loc.translate('years')}' : loc.translate('no_birth_date'), 
                          style: const TextStyle(fontSize: 18, color: Colors.grey)),
+                    const SizedBox(height: 8),
+                    Text(_getGenderTranslation(user.gender, loc), style: const TextStyle(fontSize: 16, color: Colors.green, fontWeight: FontWeight.w500)),
                     const SizedBox(height: 24),
                     if (user.status != null && user.status!.isNotEmpty)
                       Container(
@@ -196,7 +205,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                  setState(() => _isFriend = false);
               }, 
               icon: const Icon(Icons.person_remove),
-              label: const Text('USUŃ ZE ZNAJOMYCH'),
+              label: Text(loc.translate('remove_friend').toUpperCase()),
               style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
             ),
           )
@@ -210,7 +219,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                  setState(() => _friendRequestSent = true);
               }, 
               icon: const Icon(Icons.person_add),
-              label: Text(_friendRequestSent ? 'ZAPROSZENIE WYSŁANE' : 'DODAJ DO ZNAJOMYCH'),
+              label: Text(_friendRequestSent ? loc.translate('friend_sent').toUpperCase() : loc.translate('add_friend').toUpperCase()),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
             ),
           ),

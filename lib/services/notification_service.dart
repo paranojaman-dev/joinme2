@@ -34,6 +34,9 @@ class NotificationService {
       },
     );
 
+    // Rejestracja kanału dla Androida w nowszych wersjach pluginu odbywa się automatycznie przy wyświetlaniu,
+    // ale możemy go jawnie zadeklarować w AndroidNotificationDetails.
+    
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       _showLocalNotification(message);
     });
@@ -47,7 +50,6 @@ class NotificationService {
     );
   }
 
-  // Nowa uniwersalna metoda do wyświetlania powiadomień
   static Future<void> showSimpleNotification({
     required String title,
     required String body,
@@ -66,7 +68,7 @@ class NotificationService {
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
-      DateTime.now().millisecond, // Unikalne ID
+      DateTime.now().millisecond,
       title,
       body,
       platformDetails,

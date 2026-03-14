@@ -104,6 +104,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  String _getGenderTranslation(String? gender, AppLocalizations loc) {
+    if (gender == null) return '---';
+    String g = gender.toLowerCase();
+    if (g == 'male' || g == 'mężczyzna') return loc.translate('male');
+    if (g == 'female' || g == 'kobieta') return loc.translate('female');
+    return loc.translate('other_gender');
+  }
+
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
@@ -132,12 +140,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100), // Zwiększony padding na dole
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
                 child: Form(
                   key: _formKey,
                   child: Column(
                     children: [
-                      // AWATAR
                       GestureDetector(
                         onTap: () async {
                           final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
@@ -148,7 +155,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           backgroundColor: Colors.green.shade700,
                           child: CircleAvatar(
                             radius: 56,
-                            backgroundImage: _image != null ? FileImage(_image!) : (_photoURL != null ? NetworkImage(_photoURL!) : null) as ImageProvider?,
+                            backgroundImage: _image != null ? FileImage(_image!) : (_photoURL != null && _photoURL!.isNotEmpty ? NetworkImage(_photoURL!) : null) as ImageProvider?,
                           ),
                         ),
                       ),
@@ -174,7 +181,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             child: _buildSectionCard(
                               icon: Icons.people_outline,
                               title: loc.translate('gender'),
-                              child: Text(_userModel?.gender ?? '---', style: const TextStyle(fontSize: 18, color: Colors.white)),
+                              child: Text(_getGenderTranslation(_userModel?.gender, loc), style: const TextStyle(fontSize: 18, color: Colors.white)),
                             ),
                           ),
                         ],
@@ -221,11 +228,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       _buildSectionCard(
                         icon: Icons.manage_search,
-                        title: loc.translate('visibility_age_desc'),
+                        title: "${loc.translate('visibility_age_desc')}: ${_visibilityAgeRange.start.round()} - ${_visibilityAgeRange.end.round()} ${loc.translate('years')}",
                         child: RangeSlider(
                           values: _visibilityAgeRange,
                           min: 18, max: 99, divisions: 81,
                           activeColor: Colors.green,
+                          labels: RangeLabels(
+                            _visibilityAgeRange.start.round().toString(),
+                            _visibilityAgeRange.end.round().toString(),
+                          ),
                           onChanged: (v) => setState(() => _visibilityAgeRange = v),
                         ),
                       ),
@@ -270,7 +281,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           child: Text(loc.translate('save').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                         ),
                       ),
-                      const SizedBox(height: 80), // DODATKOWY ODSTĘP NA DOLE
+                      const SizedBox(height: 80),
                     ],
                   ),
                 ),

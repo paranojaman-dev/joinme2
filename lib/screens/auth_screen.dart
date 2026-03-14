@@ -61,32 +61,73 @@ class _AuthScreenState extends State<AuthScreen> {
           await user.reload();
           if (user.emailVerified) {
             timer.cancel();
-            if (mounted) setState(() {}); // Odświeżenie wymusi przejście przez AuthWrapper
+            if (mounted) setState(() {}); 
           }
-        } catch (e) {
-          // Ignorujemy błędy sieciowe w tle
-        }
+        } catch (_) {}
       }
     });
   }
 
-  Future<void> _manualCheckStatus() async {
-    final user = _auth.currentUser;
-    if (user != null) {
-      setState(() => _isLoading = true);
-      try {
-        await user.reload();
-        if (user.emailVerified) {
-          if (mounted) setState(() {});
-        } else {
-          final loc = AppLocalizations.of(context)!;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(loc.translate('email_verification'))),
-          );
-        }
-      } finally {
-        if (mounted) setState(() => _isLoading = false);
+  Future<void> _resendVerificationEmail() async {
+    final loc = AppLocalizations.of(context)!;
+    try {
+      final user = _auth.currentUser;
+      if (user != null) {
+        await user.sendEmailVerification();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(loc.translate('verification_sent_body'))),
+        );
       }
+    } catch (e) {
+      _showErrorDialog(e.toString());
+    }
+  }
+
+  void _showLoginErrorDialog() {
+    final loc = AppLocalizations.of(context)!;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(loc.translate('error')),
+        content: Text(loc.translate('invalid_credentials')),
+        actions: [
+          TextButton(
+            child: Text(loc.translate('no_account_signup').toUpperCase(), style: const TextStyle(color: Colors.green)),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() => _currentMode = AuthMode.registerTerms);
+            },
+          ),
+          TextButton(
+            child: Text(loc.translate('forgot_password').toUpperCase(), style: const TextStyle(color: Colors.orange)),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _resetPassword();
+            },
+          ),
+          TextButton(child: const Text('OK'), onPressed: () => Navigator.of(ctx).pop())
+        ],
+      ),
+    );
+  }
+
+  Future<void> _resetPassword() async {
+    final loc = AppLocalizations.of(context)!;
+    final email = _emailController.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      _showErrorDialog(loc.translate('provide_email'));
+      return;
+    }
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+              title: Text(loc.translate('reset_link_sent')),
+              content: Text(loc.translate('check_mailbox')),
+              actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))]));
+    } catch (e) {
+      _showErrorDialog(loc.translate('unknown_error'));
     }
   }
 
@@ -102,50 +143,6 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  void _showCreateAccountPrompt() {
-    final loc = AppLocalizations.of(context)!;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: Text(loc.translate('account_not_found')),
-        content: Text(loc.translate('ask_create_account')),
-        actions: [
-          TextButton(child: Text(loc.translate('no')), onPressed: () => Navigator.of(ctx).pop()),
-          TextButton(
-            child: Text(loc.translate('yes')),
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              setState(() => _currentMode = AuthMode.registerTerms);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showLoginPrompt() {
-    final loc = AppLocalizations.of(context)!;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: Text(loc.translate('account_already_exists')),
-        content: Text(loc.translate('ask_login_instead')),
-        actions: [
-          TextButton(child: Text(loc.translate('no')), onPressed: () => Navigator.of(ctx).pop()),
-          TextButton(
-            child: Text(loc.translate('yes')),
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              setState(() => _currentMode = AuthMode.login);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _handleAuth() async {
     final loc = AppLocalizations.of(context)!;
     final email = _emailController.text.trim();
@@ -157,25 +154,10 @@ class _AuthScreenState extends State<AuthScreen> {
       try {
         await _auth.signInWithEmailAndPassword(email: email, password: password);
       } on FirebaseAuthException catch (e) {
-        if (e.code == 'user-not-found') {
-          _showCreateAccountPrompt();
-        } else if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
-          // Próbujemy upewnić się czy mail istnieje
-          try {
-            final methods = await _auth.fetchSignInMethodsForEmail(email);
-            if (methods.isEmpty) {
-              _showCreateAccountPrompt();
-            } else {
-              _showErrorDialog(loc.translate('invalid_credentials'));
-            }
-          } catch (_) {
-            _showErrorDialog(loc.translate('invalid_credentials'));
-          }
-        } else {
-          _showErrorDialog(loc.translate('unknown_error'));
-        }
+        setState(() => _isLoading = false);
+        _showLoginErrorDialog();
       } finally {
-        if (mounted) setState(() => _isLoading = false);
+        if (mounted && _isLoading) setState(() => _isLoading = false);
       }
     } 
     else if (_currentMode == AuthMode.registerTerms) {
@@ -211,13 +193,15 @@ class _AuthScreenState extends State<AuthScreen> {
         setState(() => _currentMode = AuthMode.waitingForVerification);
         _startVerificationCheck();
       } on FirebaseAuthException catch (e) {
+        setState(() => _isLoading = false);
         if (e.code == 'email-already-in-use') {
-          _showLoginPrompt();
+          _showErrorDialog(loc.translate('account_already_exists'));
         } else {
           _showErrorDialog(loc.translate('unknown_error'));
         }
-      } finally {
-        if (mounted) setState(() => _isLoading = false);
+      } catch (e) {
+        setState(() => _isLoading = false);
+        _showErrorDialog(e.toString());
       }
     }
   }
@@ -370,11 +354,14 @@ class _AuthScreenState extends State<AuthScreen> {
       const SizedBox(height: 16),
       Text(loc.translate('verification_sent_body'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
       const SizedBox(height: 30),
-      SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          onPressed: _manualCheckStatus,
-          child: const Text("ODŚWIEŻ STATUS"),
+      const Center(child: CircularProgressIndicator(color: Colors.green)),
+      const SizedBox(height: 30),
+      Center(
+        child: ElevatedButton.icon(
+          onPressed: _resendVerificationEmail,
+          icon: const Icon(Icons.refresh),
+          label: const Text("WYŚLIJ PONOWNIE"),
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
         ),
       ),
     ];

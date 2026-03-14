@@ -46,10 +46,12 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
 
   void _refreshEvent() async {
     final updatedDoc = await FirebaseFirestore.instance.collection('events').doc(_currentEvent.id).get();
-    if (mounted) {
+    if (mounted && updatedDoc.exists) {
       setState(() {
         _currentEvent = Event.fromFirestore(updatedDoc);
       });
+    } else if (mounted && !updatedDoc.exists) {
+       Navigator.pop(context); // Wydarzenie usunięte
     }
   }
 
@@ -70,6 +72,26 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     if (confirm) {
       await _databaseService.deleteEvent(_currentEvent.id);
       if (mounted) Navigator.pop(context);
+    }
+  }
+
+  void _kickUser(String userId, String userName) async {
+    final loc = AppLocalizations.of(context)!;
+    bool confirm = await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Usuń uczestnika"),
+        content: Text("Czy na pewno chcesz usunąć użytkownika $userName z wydarzenia?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(loc.translate('no'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(loc.translate('yes'), style: const TextStyle(color: Colors.red))),
+        ],
+      )
+    ) ?? false;
+
+    if (confirm) {
+      await _databaseService.kickParticipant(_currentEvent.id, userId);
+      _refreshEvent();
     }
   }
 
@@ -113,7 +135,63 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                     Text(_currentEvent.description, style: const TextStyle(fontSize: 16)),
                     const SizedBox(height: 30),
                     
-                    // PRZYCISK: POKAŻ NA MAPIE
+                    if (isCreator && _currentEvent.participants.isNotEmpty) ...[
+                      Text(loc.translate('participants_list'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryColor)),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 90,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _currentEvent.participants.length,
+                          itemBuilder: (context, index) {
+                            final userId = _currentEvent.participants[index];
+                            return FutureBuilder<DocumentSnapshot>(
+                              future: _databaseService.getUserData(userId),
+                              builder: (context, snapshot) {
+                                if (!snapshot.hasData) return const SizedBox.shrink();
+                                final data = snapshot.data!.data() as Map<String, dynamic>;
+                                final photo = data['photoURL'] ?? '';
+                                final name = data['nickname'] ?? 'User';
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 16),
+                                  child: Column(
+                                    children: [
+                                      Stack(
+                                        children: [
+                                          GestureDetector(
+                                            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => UserProfileScreen(userId: userId))),
+                                            child: CircleAvatar(
+                                              radius: 25,
+                                              backgroundImage: photo.isNotEmpty ? NetworkImage(photo) : null,
+                                              child: photo.isEmpty ? const Icon(Icons.person) : null,
+                                            ),
+                                          ),
+                                          Positioned(
+                                            right: -5, top: -5,
+                                            child: GestureDetector(
+                                              onTap: () => _kickUser(userId, name),
+                                              child: Container(
+                                                padding: const EdgeInsets.all(2),
+                                                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                                                child: const Icon(Icons.close, size: 14, color: Colors.white),
+                                              ),
+                                            ),
+                                          )
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(name, style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                                    ],
+                                  ),
+                                );
+                              }
+                            );
+                          },
+                        ),
+                      ),
+                      const Divider(height: 40),
+                    ],
+
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -132,7 +210,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                     ),
                     const SizedBox(height: 16),
                     
-                    // PRZYCISKI DLA TWÓRCY
                     if (isCreator) ...[
                       SizedBox(
                         width: double.infinity,
@@ -157,7 +234,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                       ),
                     ],
 
-                    // PRZYCISKI DLA UCZESTNIKA
                     if (!isCreator)
                       SizedBox(
                         width: double.infinity,

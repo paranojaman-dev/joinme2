@@ -12,11 +12,9 @@ import 'package:joinme2/services/notification_service.dart';
 import 'package:joinme2/utils/app_localizations.dart';
 import 'package:provider/provider.dart';
 
-// Adnotacja wymagana dla powiadomień w tle
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  print("Handling a background message: ${message.messageId}");
 }
 
 Future<void> main() async {
@@ -26,25 +24,24 @@ Future<void> main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: AndroidProvider.debug,
+    );
     
-    // Inicjalizacja powiadomień
     await NotificationService.initialize();
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
     
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      await DatabaseService().saveUserToken(user.uid);
+      final db = DatabaseService();
+      await db.saveUserToken(user.uid);
+      await db.updateUserStatus(user.uid, true);
     }
     
   } on FirebaseException catch (e) {
-    if (e.code != 'duplicate-app') {
-      rethrow;
-    }
+    if (e.code != 'duplicate-app') rethrow;
   }
-
-  await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.debug,
-  );
   
   runApp(const MyApp());
 }
@@ -63,18 +60,13 @@ class MyApp extends StatelessWidget {
             theme: ThemeData.dark().copyWith(
               primaryColor: Colors.green.shade700,
               scaffoldBackgroundColor: const Color(0xFF121212),
+              appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF1E1E1E), elevation: 0),
             ),
             debugShowCheckedModeBanner: false,
             locale: appState.locale,
             supportedLocales: const [
-              Locale('pl'),
-              Locale('en'),
-              Locale('de'),
-              Locale('fr'),
-              Locale('es'),
-              Locale('it'),
-              Locale('zh'),
-              Locale('ar'),
+              Locale('pl'), Locale('en'), Locale('de'), Locale('fr'),
+              Locale('es'), Locale('it'), Locale('zh'), Locale('ar'),
             ],
             localizationsDelegates: const [
               AppLocalizations.delegate,

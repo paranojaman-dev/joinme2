@@ -8,7 +8,8 @@ class PinModel {
   final double latitude;
   final double longitude;
   final DateTime createdAt;
-  final String? eventId; // Powiązane wydarzenie, jeśli istnieje
+  final String? spotifyTrackId; // Opcjonalna muzyka
+  final Map<String, dynamic>? visibilityRequirements; // Wiek, płeć twórcy w momencie stawiania
 
   PinModel({
     required this.id,
@@ -18,7 +19,8 @@ class PinModel {
     required this.latitude,
     required this.longitude,
     required this.createdAt,
-    this.eventId,
+    this.spotifyTrackId,
+    this.visibilityRequirements,
   });
 
   factory PinModel.fromFirestore(DocumentSnapshot doc) {
@@ -31,7 +33,8 @@ class PinModel {
       latitude: (data['latitude'] ?? 0.0).toDouble(),
       longitude: (data['longitude'] ?? 0.0).toDouble(),
       createdAt: (data['createdAt'] as Timestamp).toDate(),
-      eventId: data['eventId'],
+      spotifyTrackId: data['spotifyTrackId'],
+      visibilityRequirements: data['visibilityRequirements'],
     );
   }
 
@@ -43,7 +46,8 @@ class PinModel {
       'latitude': latitude,
       'longitude': longitude,
       'createdAt': Timestamp.fromDate(createdAt),
-      'eventId': eventId,
+      'spotifyTrackId': spotifyTrackId,
+      'visibilityRequirements': visibilityRequirements,
     };
   }
 }

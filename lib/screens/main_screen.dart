@@ -35,7 +35,6 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _setupNotificationListener() {
-    // Słuchamy tylko nowych powiadomień (dodanych po teraz)
     _notificationSubscription = _databaseService.getNotifications(_currentUserId).listen((snapshot) {
       for (var change in snapshot.docChanges) {
         if (change.type == DocumentChangeType.added) {
@@ -43,10 +42,9 @@ class _MainScreenState extends State<MainScreen> {
           final bool isRead = data['read'] ?? false;
           final Timestamp? timestamp = data['timestamp'] as Timestamp?;
 
-          // Wyświetlamy powiadomienie tylko jeśli jest nowe (z ostatnich 10 sekund) i nieprzeczytane
           if (!isRead && timestamp != null) {
              final diff = DateTime.now().difference(timestamp.toDate()).inSeconds;
-             if (diff < 10) {
+             if (diff < 15) {
                 _triggerSystemNotification(data);
              }
           }
@@ -56,34 +54,55 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _triggerSystemNotification(Map<String, dynamic> data) {
+    if (!mounted) return;
     final type = data['type'] as String;
     final extraData = data['extraData'] as Map<String, dynamic>?;
     final loc = AppLocalizations.of(context)!;
 
     String title = "JoinMe";
     String body = "";
+    String senderName = extraData?['senderName'] ?? loc.translate('someone');
+    String eventTitle = extraData?['eventTitle'] ?? "";
 
     switch (type) {
       case 'new_message':
-        title = extraData?['senderName'] ?? loc.translate('new_message');
-        body = extraData?['text'] ?? "";
-        break;
-      case 'event_joined':
-        title = loc.translate('event_joined');
-        body = "${extraData?['senderName']} dołączył do ${extraData?['eventTitle']}";
+        title = senderName;
+        body = extraData?['text'] ?? "...";
         break;
       case 'friend_request':
         title = loc.translate('friend_request');
-        body = loc.translate('friend_request_body');
+        body = "${loc.translate('friend_req_from')} $senderName";
+        break;
+      case 'friend_event_created':
+        title = loc.translate('new_notification');
+        body = "$senderName ${loc.translate('friend_created_event')} $eventTitle";
+        break;
+      case 'friend_event_deleted':
+        title = loc.translate('new_notification');
+        body = "$senderName ${loc.translate('friend_deleted_event')} $eventTitle";
+        break;
+      case 'new_event_nearby':
+        title = loc.translate('new_event_nearby_title');
+        body = eventTitle;
+        break;
+      case 'event_joined':
+        title = loc.translate('event_joined');
+        body = "$senderName dołączył do Twojego wydarzenia $eventTitle";
+        break;
+      case 'event_left':
+        title = "Opuścił wydarzenie";
+        body = "$senderName opuścił Twoje wydarzenie $eventTitle";
+        break;
+      case 'kicked_from_event':
+        title = "Usunięto z wydarzenia";
+        body = "Twórca usunął Cię z wydarzenia $eventTitle";
         break;
       default:
-        body = loc.translate('new_notification');
+        title = loc.translate('new_notification');
+        body = "...";
     }
 
-    NotificationService.showSimpleNotification(
-      title: title,
-      body: body,
-    );
+    NotificationService.showSimpleNotification(title: title, body: body);
   }
 
   @override
@@ -108,11 +127,30 @@ class _MainScreenState extends State<MainScreen> {
           extendBody: true, 
           backgroundColor: AppColors.backgroundColor,
           appBar: AppBar(
-            title: const Row(
+            leadingWidth: 120,
+            leading: const Padding(
+              padding: EdgeInsets.only(left: 16),
+              child: Row(
+                children: [
+                  Icon(Icons.chair, color: AppColors.primaryColor, size: 24),
+                  SizedBox(width: 8),
+                  Text('JoinMe', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                ],
+              ),
+            ),
+            centerTitle: true,
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.chair, color: AppColors.primaryColor),
-                SizedBox(width: 12),
-                Text('JoinMe', style: TextStyle(fontWeight: FontWeight.bold)),
+                if (appState.currentCity.isNotEmpty) ...[
+                  const Icon(Icons.location_on, size: 14, color: Colors.redAccent),
+                  const SizedBox(width: 4),
+                  Text(
+                    appState.currentCity, 
+                    style: const TextStyle(fontSize: 14, color: Colors.white70, fontWeight: FontWeight.w400)
+                  ),
+                ] else
+                  Text(loc.translate('loading'), style: const TextStyle(fontSize: 12, color: Colors.grey)),
               ],
             ),
             backgroundColor: AppColors.surfaceColor,
@@ -132,12 +170,7 @@ class _MainScreenState extends State<MainScreen> {
           bottomNavigationBar: Container(
             decoration: BoxDecoration(
               boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.5),
-                  blurRadius: 15,
-                  spreadRadius: 2,
-                  offset: const Offset(0, -2),
-                )
+                BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 15, spreadRadius: 2, offset: const Offset(0, -2))
               ],
             ),
             child: BottomNavigationBar(

@@ -11,7 +11,7 @@ class AuthWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.userChanges(),
+      stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, authSnapshot) {
         if (authSnapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(body: Center(child: CircularProgressIndicator(color: Colors.green)));
@@ -19,13 +19,13 @@ class AuthWrapper extends StatelessWidget {
         
         final user = authSnapshot.data;
         
-        // 1. Jeśli nikt nie jest zalogowany -> Ekran Logowania
+        // 1. Nikt niezalogowany -> Ekran logowania
         if (user == null) return const AuthScreen();
 
-        // 2. Jeśli zalogowany, ale mail niezweryfikowany -> Ekran Czekania (wewnątrz AuthScreen)
+        // 2. Zalogowany, ale brak weryfikacji maila -> Ekran logowania (tryb czekania)
         if (!user.emailVerified) return const AuthScreen();
 
-        // 3. Jeśli mail zweryfikowany, sprawdź dokument w Firestore
+        // 3. Sprawdzamy dokument w Firestore
         return StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
           builder: (context, userSnapshot) {
@@ -33,24 +33,29 @@ class AuthWrapper extends StatelessWidget {
               return const Scaffold(body: Center(child: CircularProgressIndicator(color: Colors.green)));
             }
 
-            // Jeśli dokument nie istnieje -> Wyloguj (bo to zombie konto po usunięciu)
+            // KRYTYCZNA POPRAWKA BEZPIECZEŃSTWA: 
+            // Jeśli jesteś w Auth, ale NIE MASZ dokumentu w Firestore (np. po usunięciu konta)
+            // musimy Cię wylogować całkowicie, abyś nie utknął w pętli.
             if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
-              // Używamy microtask, aby nie zmieniać stanu podczas budowania widgetu
               Future.microtask(() => FirebaseAuth.instance.signOut());
               return const AuthScreen();
             }
 
             final data = userSnapshot.data!.data() as Map<String, dynamic>?;
-            if (data == null) return const AuthScreen();
+            if (data == null) {
+              Future.microtask(() => FirebaseAuth.instance.signOut());
+              return const AuthScreen();
+            }
 
-            // 4. Sprawdź czy ukończono ustawienia mapy i premium
+            // 4. Sprawdzamy czy użytkownik ukończył onboarding
             final bool hasCompletedOnboarding = data['hasCompletedOnboarding'] ?? false;
+            final bool hasProfile = (data['firstName'] != null && data['firstName'].toString().isNotEmpty);
 
-            if (!hasCompletedOnboarding) {
+            if (!hasCompletedOnboarding || !hasProfile) {
               return const OnboardingScreen();
             }
 
-            // 5. Wszystko gotowe -> Mapa główna
+            // 5. Wszystko OK -> Mapa
             return const MainScreen();
           },
         );

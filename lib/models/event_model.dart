@@ -16,6 +16,8 @@ class Event {
   final double longitude;
   final bool isActive;
   final String imageUrl;
+  final String? spotifyTrackId; // Nowe
+  final int? iconCodePoint;    // Nowe
 
   Event({
     required this.id,
@@ -33,6 +35,8 @@ class Event {
     required this.longitude,
     this.isActive = true,
     this.imageUrl = '',
+    this.spotifyTrackId,
+    this.iconCodePoint,
   });
 
   factory Event.fromFirestore(DocumentSnapshot doc) {
@@ -53,6 +57,8 @@ class Event {
       longitude: (data['longitude'] ?? 0.0).toDouble(),
       isActive: data['isActive'] ?? true,
       imageUrl: data['imageUrl'] ?? '',
+      spotifyTrackId: data['spotifyTrackId'],
+      iconCodePoint: data['iconCodePoint'],
     );
   }
 
@@ -72,6 +78,8 @@ class Event {
       'longitude': longitude,
       'isActive': isActive,
       'imageUrl': imageUrl,
+      'spotifyTrackId': spotifyTrackId,
+      'iconCodePoint': iconCodePoint,
     };
   }
 }

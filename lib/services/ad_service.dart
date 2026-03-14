@@ -34,22 +34,26 @@ class AdService {
     );
   }
 
-  void showInterstitialAd() {
+  void showInterstitialAd([Function? onDismissed]) {
     if (_interstitialAd == null) {
       loadInterstitialAd();
+      if (onDismissed != null) onDismissed();
       return;
     }
     _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         loadInterstitialAd();
+        if (onDismissed != null) onDismissed();
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
         ad.dispose();
         loadInterstitialAd();
+        if (onDismissed != null) onDismissed();
       },
     );
     _interstitialAd!.show();
+    _interstitialAd = null;
   }
 
   void loadRewardedAd() {

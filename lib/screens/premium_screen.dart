@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:joinme2/screens/main_screen.dart';
 import 'package:joinme2/utils/app_localizations.dart';
-import 'package:joinme2/utils/constants.dart';
 
 class PremiumScreen extends StatelessWidget {
   const PremiumScreen({super.key});
@@ -10,101 +10,126 @@ class PremiumScreen extends StatelessWidget {
     final loc = AppLocalizations.of(context)!;
     
     return Scaffold(
+      backgroundColor: const Color(0xFF121212),
       appBar: AppBar(
         title: Text(loc.translate('premium')),
-        backgroundColor: Colors.amber.shade700,
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.amber.shade50, Colors.white],
-          ),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () {
+            // Jeśli użytkownik zamknie ekran premium po onboardingu, idzie do Main
+            Navigator.pushReplacement(
+              context, 
+              MaterialPageRoute(builder: (context) => const MainScreen())
+            );
+          },
         ),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Opacity(
-                opacity: 0.03,
-                child: Center(child: Icon(Icons.chair, size: 400, color: Colors.amber.shade900)),
-              ),
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.05,
+              child: Center(child: Icon(Icons.chair, size: 350, color: Colors.green.shade700)),
             ),
-            Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                children: [
-                  const Icon(Icons.stars, size: 80, color: Colors.amber),
-                  const SizedBox(height: 16),
-                  Text(
-                    loc.translate('premium').toUpperCase(),
-                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.amber),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Column(
+              children: [
+                const Icon(Icons.stars_rounded, size: 80, color: Colors.amber),
+                const SizedBox(height: 16),
+                Text(
+                  loc.translate('premium').toUpperCase(),
+                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.amber, letterSpacing: 2),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  loc.translate('premium_desc'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, color: Colors.grey),
+                ),
+                const SizedBox(height: 40),
+                
+                // KORZYŚCI - Zlokalizowane
+                _buildBenefit(Icons.block, loc.translate('benefit_ads'), Colors.green),
+                _buildBenefit(Icons.map_outlined, loc.translate('benefit_maps'), Colors.blue),
+                _buildBenefit(Icons.verified_user, loc.translate('benefit_badge'), Colors.amber),
+                _buildBenefit(Icons.history_toggle_off, loc.translate('benefit_views'), Colors.purple),
+                
+                const Spacer(),
+                
+                // PANEL ZAKUPU
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E1E1E),
+                    borderRadius: BorderRadius.circular(25),
+                    border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 20)],
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "Unlock the full power of JoinMe",
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 40),
-                  _buildBenefitRow(Icons.block, "No intrusive advertisements"),
-                  _buildBenefitRow(Icons.map, "Instant access to map markers"),
-                  _buildBenefitRow(Icons.verified, "Exclusive Golden Badge on profile"),
-                  _buildBenefitRow(Icons.history, "See who viewed your profile"),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-                    ),
-                    child: Column(
-                      children: [
-                        const Text(
-                          "9.99 PLN / month",
-                          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 55,
-                          child: ElevatedButton(
-                            onPressed: () {
-                              // Logika płatności
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.amber.shade700,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: const Text("ACTIVATE PREMIUM", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  child: Column(
+                    children: [
+                      Text(
+                        loc.translate('price_monthly'), 
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 55,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            // Tu będzie in_app_purchase
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green.shade700,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                          ),
+                          child: Text(
+                            loc.translate('activate_premium'), 
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    "Cancel anytime in your store settings.",
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  loc.translate('cancel_anytime'), 
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)
+                ),
+                const SizedBox(height: 20),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildBenefitRow(IconData icon, String text) {
+  Widget _buildBenefit(IconData icon, String text, Color color) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.only(bottom: 18),
       child: Row(
         children: [
-          Icon(icon, color: Colors.amber.shade700),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
           const SizedBox(width: 16),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500))),
+          Expanded(
+            child: Text(
+              text, 
+              style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.w500)
+            )
+          ),
         ],
       ),
     );

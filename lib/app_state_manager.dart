@@ -4,16 +4,19 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:joinme2/services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 
 class AppStateManager extends ChangeNotifier {
   Locale _locale = const Locale('pl');
   String _mapStyle = 'normal';
   bool _isOnline = true;
-  String _visibility = 'public'; // 'public' lub 'private'
+  String _visibility = 'public'; 
   bool _isInitialized = false;
   LatLng? _mapJumpTo;
   int _currentTabIndex = 0;
   bool _hasShownMapBanner = false; 
+  String _currentCity = ""; // Nowe pole na nazwę miasta
   
   final _controller = StreamController<void>.broadcast();
   Stream<void> getStream() => _controller.stream;
@@ -29,6 +32,7 @@ class AppStateManager extends ChangeNotifier {
   int get currentTabIndex => _currentTabIndex;
   double get searchRadius => _searchRadius;
   bool get hasShownMapBanner => _hasShownMapBanner;
+  String get currentCity => _currentCity; // Getter dla miasta
 
   AppStateManager() {
     _loadSettings();
@@ -47,8 +51,29 @@ class AppStateManager extends ChangeNotifier {
       }
     }
     
+    // Pobieramy miasto przy starcie
+    await updateCityName();
+    
     _isInitialized = true;
     notifyListeners();
+  }
+
+  // Nowa metoda odczytująca miasto
+  Future<void> updateCityName() async {
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.low
+      );
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude, position.longitude
+      );
+      if (placemarks.isNotEmpty) {
+        _currentCity = placemarks.first.locality ?? "";
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint("Błąd odczytu miasta: $e");
+    }
   }
 
   void setHasShownMapBanner(bool value) {
@@ -112,7 +137,6 @@ class AppStateManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  // TA METODA BYŁA POTRZEBNA DLA ONBOARDINGU
   void refreshState() {
     notifyListeners();
   }

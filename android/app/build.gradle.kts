@@ -8,8 +8,7 @@ plugins {
 android {
     namespace = "com.example.joinme2"
     
-    // Wymuszona wersja 36 dla pełnej kompatybilności z nowymi bibliotekami
-    compileSdk = 36
+    compileSdk = 36 // Wymagane przez najnowsze wersje pluginów (Google Maps, Geolocator)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -19,13 +18,13 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "17"
     }
 
     defaultConfig {
         applicationId = "com.joinme2.app"
         minSdk = flutter.minSdkVersion
-        targetSdk = 36 // Podbite do 36, aby pasowało do compileSdk
+        targetSdk = 36 // Zaktualizowane do 36 zgodnie z wymaganiami bibliotek
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

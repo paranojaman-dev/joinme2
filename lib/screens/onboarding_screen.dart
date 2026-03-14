@@ -69,12 +69,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       backgroundColor: const Color(0xFF121212),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 10),
           child: Column(
             children: [
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
               Center(child: Icon(Icons.chair, color: Colors.green.shade700, size: 40)),
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
               Expanded(
                 child: IndexedStack(
                   index: _currentStep,
@@ -83,28 +83,42 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     _buildStep(
                       icon: Icons.map_outlined,
                       title: loc.translate('choose_map_style'),
-                      content: Column(
-                        children: [
-                          _mapStyleOption(appState, 'normal', loc.translate('style_normal')),
-                          _mapStyleOption(appState, 'dark', loc.translate('style_dark')),
-                          _mapStyleOption(appState, 'neon', loc.translate('style_neon')),
-                        ],
+                      content: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            _mapStyleOption(appState, 'normal', loc.translate('style_normal')),
+                            _mapStyleOption(appState, 'dark', loc.translate('style_dark')),
+                            _mapStyleOption(appState, 'retro', loc.translate('style_retro')),
+                            _mapStyleOption(appState, 'neon', loc.translate('style_neon')),
+                            _mapStyleOption(appState, 'alice', loc.translate('style_alice')),
+                            _mapStyleOption(appState, 'medieval', loc.translate('style_medieval')),
+                            _mapStyleOption(appState, 'joinme', loc.translate('style_joinme')),
+                          ],
+                        ),
                       ),
                     ),
                     // KROK 2: PREMIUM
                     _buildStep(
                       icon: Icons.stars_rounded,
-                      title: loc.translate('get_premium') ?? "JoinMe Premium",
+                      title: loc.translate('get_premium'),
                       content: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            loc.translate('premium_desc') ?? "Odblokuj wszystkie funkcje i usuń reklamy!",
+                            loc.translate('premium_desc'),
                             textAlign: TextAlign.center,
                             style: const TextStyle(color: Colors.grey, fontSize: 16),
                           ),
                           const SizedBox(height: 40),
-                          const Icon(Icons.verified_user, color: Colors.amber, size: 100),
+                          Container(
+                            padding: const EdgeInsets.all(30),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.amber.withOpacity(0.1),
+                              border: Border.all(color: Colors.amber.withOpacity(0.3), width: 2),
+                            ),
+                            child: const Icon(Icons.verified_user, color: Colors.amber, size: 100),
+                          ),
                         ],
                       ),
                     ),
@@ -112,7 +126,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.only(top: 20),
+                padding: const EdgeInsets.only(top: 20, bottom: 10),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -120,16 +134,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green.shade700,
-                          padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+                          padding: const EdgeInsets.symmetric(horizontal: 60, vertical: 15),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                         ),
                         onPressed: () => setState(() => _currentStep = 1),
-                        child: Text(loc.translate('next').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
+                        child: Text(loc.translate('next').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                       ),
                     if (_currentStep == 1) ...[
                       TextButton(
                         onPressed: () => _finishOnboarding(false),
-                        child: Text(loc.translate('later') ?? "PÓŹNIEJ", style: const TextStyle(color: Colors.grey)),
+                        child: Text(loc.translate('later'), style: const TextStyle(color: Colors.grey)),
                       ),
                       const SizedBox(width: 20),
                       ElevatedButton(
@@ -139,7 +153,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                         ),
                         onPressed: () => _finishOnboarding(true),
-                        child: Text(loc.translate('buy_now') ?? "KUP TERAZ", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+                        child: Text(loc.translate('buy_now'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
                       ),
                     ]
                   ],
@@ -155,10 +169,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget _buildStep({required IconData icon, required String title, required Widget content}) {
     return Column(
       children: [
-        Icon(icon, size: 80, color: _currentStep == 1 ? Colors.amber : Colors.green),
-        const SizedBox(height: 24),
-        Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-        const SizedBox(height: 30),
+        Icon(icon, size: 60, color: _currentStep == 1 ? Colors.amber : Colors.green),
+        const SizedBox(height: 16),
+        Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+        const SizedBox(height: 20),
         Expanded(child: content),
       ],
     );
@@ -170,7 +184,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       onTap: () => state.setMapStyle(style),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         decoration: BoxDecoration(
           border: Border.all(color: isSelected ? Colors.green : Colors.grey.shade800),
           borderRadius: BorderRadius.circular(15),

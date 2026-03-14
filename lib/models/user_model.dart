@@ -20,6 +20,10 @@ class UserModel {
   final GeoPoint? location;
   final Map<String, dynamic> currentActivity;
   final List friends;
+  // Nowe ustawienia powiadomień
+  final bool notifyFriends;
+  final bool notifyFriendEvents;
+  final bool notifyAllEvents;
 
   UserModel({
     required this.uid,
@@ -41,6 +45,9 @@ class UserModel {
     this.location,
     required this.currentActivity,
     required this.friends,
+    this.notifyFriends = true,
+    this.notifyFriendEvents = true,
+    this.notifyAllEvents = true,
   });
 
   int? get age {
@@ -77,6 +84,9 @@ class UserModel {
       'location': location,
       'currentActivity': currentActivity,
       'friends': friends,
+      'notifyFriends': notifyFriends,
+      'notifyFriendEvents': notifyFriendEvents,
+      'notifyAllEvents': notifyAllEvents,
     };
   }
 
@@ -114,6 +124,9 @@ class UserModel {
       location: loc,
       currentActivity: Map<String, dynamic>.from(map['currentActivity'] ?? {}),
       friends: List.from(map['friends'] ?? []),
+      notifyFriends: map['notifyFriends'] ?? true,
+      notifyFriendEvents: map['notifyFriendEvents'] ?? true,
+      notifyAllEvents: map['notifyAllEvents'] ?? true,
     );
   }
 }

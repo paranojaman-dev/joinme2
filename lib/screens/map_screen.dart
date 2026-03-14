@@ -20,7 +20,9 @@ import 'package:joinme2/services/location_service.dart';
 import 'package:joinme2/services/ad_service.dart';
 import 'package:joinme2/utils/app_localizations.dart';
 import 'package:joinme2/utils/map_styles.dart';
+import 'package:joinme2/utils/constants.dart';
 import 'package:provider/provider.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -33,12 +35,11 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   GoogleMapController? _mapController;
   Position? _currentPosition;
   bool _isLoading = true;
-  bool _showBanner = false;
   bool _isAddingPin = false; 
   double _currentZoom = 14.0;
+  String? _lastAppliedStyle;
   StreamSubscription? _appStateSubscription;
-  late AnimationController _bannerController;
-  late Animation<double> _bannerScale;
+  final AudioPlayer _audioPlayer = AudioPlayer();
   
   Map<String, Marker> _userMarkers = {};
   Map<String, Marker> _eventMarkers = {};
@@ -50,36 +51,25 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   final String _currentUserId = FirebaseAuth.instance.currentUser!.uid;
   UserModel? _currentUserModel;
 
+  bool _showOnlyFriends = false;
+
+  final List<IconData> _availableIcons = [
+    Icons.favorite, Icons.star, Icons.music_note, Icons.restaurant, 
+    Icons.directions_run, Icons.local_bar, Icons.camera_alt, Icons.sports_esports
+  ];
+
   @override
   void initState() {
     super.initState();
     _initializeMap();
     _adService.loadInterstitialAd();
-
-    _bannerController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-    _bannerScale = CurvedAnimation(parent: _bannerController, curve: Curves.easeOutBack);
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final appState = Provider.of<AppStateManager>(context, listen: false);
-      if (!appState.hasShownMapBanner) {
-        setState(() => _showBanner = true);
-        _bannerController.forward();
-        appState.setHasShownMapBanner(true);
-        Future.delayed(const Duration(seconds: 10), () {
-          if (mounted && _showBanner) {
-            _bannerController.reverse().then((_) {
-              if (mounted) setState(() => _showBanner = false);
-            });
-          }
-        });
-      }
-
       _appStateSubscription = appState.getStream().listen((_) {
-         _handleJump();
+        if (mounted) _handleJump();
       });
+      _handleJump();
     });
   }
 
@@ -88,13 +78,14 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     if (appState.mapJumpTo != null && _mapController != null) {
       _mapController!.animateCamera(CameraUpdate.newLatLngZoom(appState.mapJumpTo!, 16));
       appState.clearJumpTo();
+      _fetchData(); // Odśwież, aby marker na pewno się pojawił
     }
   }
   
   @override
   void dispose() {
     _appStateSubscription?.cancel();
-    _bannerController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -106,229 +97,306 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         _currentUserModel = UserModel.fromMap(userData.data() as Map<String, dynamic>);
       }
       final position = await LocationService.getCurrentLocation();
-      if (mounted) setState(() => _currentPosition = position);
+      if (mounted) {
+        setState(() => _currentPosition = position);
+        await _databaseService.updateUserLocation(_currentUserId, position.latitude, position.longitude);
+      }
       await _fetchData();
-      Future.delayed(const Duration(milliseconds: 500), () => _handleJump());
-    } catch (e) {
-      debugPrint("❌ Map Error: $e");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    } catch (e) { debugPrint("❌ Map Error: $e"); }
+    finally { if (mounted) setState(() => _isLoading = false); }
   }
 
   Future<void> _fetchData() async {
     try {
       final appState = Provider.of<AppStateManager>(context, listen: false);
+      final userData = await _databaseService.getUserData(_currentUserId);
+      if (userData.exists) {
+        _currentUserModel = UserModel.fromMap(userData.data() as Map<String, dynamic>);
+      }
+
       final userSnapshot = await _databaseService.getUsersOnce();
       final eventSnapshot = await _databaseService.getEventsOnce();
       final pinSnapshot = await _databaseService.getPinsOnce();
       
-      List<DocumentSnapshot> filteredUsers = userSnapshot.docs.where((doc) {
-        if (doc.id == _currentUserId) return false;
-        final data = doc.data() as Map<String, dynamic>;
-        if (data['location'] == null) return false;
-        GeoPoint loc = data['location'];
-        double dist = _calculateDistance(_currentPosition?.latitude ?? 0, _currentPosition?.longitude ?? 0, loc.latitude, loc.longitude);
-        return appState.searchRadius == 0 || dist <= appState.searchRadius;
-      }).toList();
+      await _updateMarkers(
+        userDocs: userSnapshot.docs, 
+        eventDocs: eventSnapshot.docs, 
+        pinDocs: pinSnapshot.docs,
+        appState: appState
+      );
+    } catch (e) { debugPrint("❌ Fetch Error: $e"); }
+  }
 
-      List<DocumentSnapshot> filteredEvents = eventSnapshot.docs.where((doc) {
-        final event = Event.fromFirestore(doc);
-        double dist = _calculateDistance(_currentPosition?.latitude ?? 0, _currentPosition?.longitude ?? 0, event.latitude, event.longitude);
-        return appState.searchRadius == 0 || dist <= appState.searchRadius;
-      }).toList();
-
-      await _updateMarkers(userDocs: filteredUsers, eventDocs: filteredEvents, pinDocs: pinSnapshot.docs);
-    } catch (e) {
-      debugPrint("❌ Fetch Error: $e");
+  LatLng _applyJitter(LatLng position, Set<LatLng> existingPositions) {
+    double lat = position.latitude;
+    double lng = position.longitude;
+    final random = Random();
+    
+    bool isOccupied(double la, double ln) {
+      for (var pos in existingPositions) {
+        if ((pos.latitude - la).abs() < 0.0001 && (pos.longitude - ln).abs() < 0.0001) return true;
+      }
+      return false;
     }
+
+    int attempts = 0;
+    while (isOccupied(lat, lng) && attempts < 15) {
+      lat += (random.nextDouble() - 0.5) * 0.00025;
+      lng += (random.nextDouble() - 0.5) * 0.00025;
+      attempts++;
+    }
+    existingPositions.add(LatLng(lat, lng));
+    return LatLng(lat, lng);
   }
 
-  double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-    var p = 0.017453292519943295;
-    var c = cos;
-    var a = 0.5 - c((lat2 - lat1) * p) / 2 + c(lat1 * p) * c(lat2 * p) * (1 - c((lon2 - lon1) * p)) / 2;
-    return 12742 * asin(sqrt(a));
+  bool _shouldSeeObject(Map<String, dynamic>? visibilitySettings, String creatorId, {List<dynamic>? participants, LatLng? objectPos, double? maxRadius}) {
+    if (_currentUserModel == null) return true;
+    if (creatorId == _currentUserId) return true; 
+    
+    if (participants != null && participants.contains(_currentUserId)) return true;
+
+    if (_showOnlyFriends) {
+      if (!_currentUserModel!.friends.contains(creatorId)) return false;
+    }
+
+    if (objectPos != null && _currentPosition != null) {
+      double distance = Geolocator.distanceBetween(
+        _currentPosition!.latitude, _currentPosition!.longitude,
+        objectPos.latitude, objectPos.longitude
+      ) / 1000; 
+      if (distance > (maxRadius ?? 500)) return false;
+    }
+
+    if (visibilitySettings == null || visibilitySettings.isEmpty) return true;
+    
+    int minAge = visibilitySettings['ageRange']?['min'] ?? 18;
+    int maxAge = visibilitySettings['ageRange']?['max'] ?? 99;
+    bool showMen = visibilitySettings['showToMen'] ?? true;
+    bool showWomen = visibilitySettings['showToWomen'] ?? true;
+    bool showOther = visibilitySettings['showToOther'] ?? true;
+
+    int? myAge = _currentUserModel!.age;
+    String myGender = (_currentUserModel!.gender ?? 'other').toLowerCase();
+
+    if (myAge != null && (myAge < minAge || myAge > maxAge)) return false;
+    
+    if ((myGender.contains('mal') || myGender.contains('męż')) && !showMen) return false;
+    if ((myGender.contains('fem') || myGender.contains('kob')) && !showWomen) return false;
+    if (!myGender.contains('mal') && !myGender.contains('męż') && !myGender.contains('fem') && !myGender.contains('kob') && !showOther) return false;
+
+    return true;
   }
 
-  Future<void> _updateMarkers({List<DocumentSnapshot>? userDocs, List<DocumentSnapshot>? eventDocs, List<DocumentSnapshot>? pinDocs}) async {
+  Future<void> _updateMarkers({
+    required List<DocumentSnapshot> userDocs, 
+    required List<DocumentSnapshot> eventDocs, 
+    required List<DocumentSnapshot> pinDocs,
+    required AppStateManager appState
+  }) async {
     bool miniStyle = _currentZoom < 13.0;
+    Set<LatLng> usedPositions = {};
 
     if (_currentUserModel != null && _currentPosition != null) {
+      LatLng myPos = LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
+      usedPositions.add(myPos);
       _myMarker = Marker(
         markerId: const MarkerId("user_me"),
-        position: LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-        icon: await _generate3DMarker(_currentUserModel!.photoURL, Colors.blue, miniStyle, _currentUserModel!.displayName),
-        zIndex: 10,
+        position: myPos,
+        icon: await _generate3DMarker(_currentUserModel!.photoURL, AppColors.primaryColor, miniStyle, _currentUserModel!.displayName, isMe: true),
         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => UserProfileScreen(userId: _currentUserId))),
       );
     }
 
-    if (userDocs != null) {
-      final Map<String, Marker> newUsers = {};
-      for (var doc in userDocs) {
-        final user = UserModel.fromMap(doc.data() as Map<String, dynamic>);
-        newUsers[doc.id] = Marker(
+    final Map<String, Marker> newPins = {};
+    for (var doc in pinDocs) {
+      final pin = PinModel.fromFirestore(doc);
+      LatLng pinPos = LatLng(pin.latitude, pin.longitude);
+      if (!_shouldSeeObject(pin.visibilityRequirements, pin.creatorId, objectPos: pinPos, maxRadius: appState.searchRadius)) continue;
+
+      LatLng pos = _applyJitter(pinPos, usedPositions);
+      newPins[doc.id] = Marker(
+        markerId: MarkerId("pin_${doc.id}"),
+        position: pos,
+        icon: await _generate3DPinMarker(pin.title, Colors.cyan, miniStyle),
+        onTap: () {
+          if (pin.spotifyTrackId != null) _playSpotifyPreview(pin.spotifyTrackId!);
+          Navigator.push(context, MaterialPageRoute(builder: (context) => UserProfileScreen(userId: pin.creatorId)));
+        },
+      );
+    }
+    _pinMarkers = newPins;
+
+    final Map<String, Marker> newEvents = {};
+    final Map<String, Map<String, dynamic>> userSettingsMap = {};
+    for (var doc in userDocs) {
+      final data = doc.data() as Map<String, dynamic>;
+      userSettingsMap[doc.id] = Map<String, dynamic>.from(data['visibilitySettings'] ?? {});
+    }
+
+    for (var doc in eventDocs) {
+      final event = Event.fromFirestore(doc);
+      final creatorSettings = userSettingsMap[event.creatorId];
+      LatLng eventPos = LatLng(event.latitude, event.longitude);
+      if (!_shouldSeeObject(creatorSettings, event.creatorId, participants: event.participants, objectPos: eventPos, maxRadius: appState.searchRadius)) continue;
+
+      LatLng pos = _applyJitter(eventPos, usedPositions);
+      newEvents[doc.id] = Marker(
+        markerId: MarkerId("event_${doc.id}"),
+        position: pos,
+        icon: await _generate3DEventMarker(event.type, miniStyle),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => EventDetailsScreen(event: event))),
+      );
+    }
+    _eventMarkers = newEvents;
+
+    final Map<String, Marker> newUserMarkers = {};
+    for (var doc in userDocs) {
+      if (doc.id == _currentUserId) continue;
+      final user = UserModel.fromMap(doc.data() as Map<String, dynamic>);
+      
+      if (user.isOnline && user.location != null && user.shareLocation) {
+        LatLng userPos = LatLng(user.location!.latitude, user.location!.longitude);
+        if (!_shouldSeeObject(user.visibilitySettings, user.uid, objectPos: userPos, maxRadius: appState.searchRadius)) continue;
+
+        LatLng pos = _applyJitter(userPos, usedPositions);
+        newUserMarkers[doc.id] = Marker(
           markerId: MarkerId("user_${doc.id}"),
-          position: LatLng(user.location!.latitude, user.location!.longitude),
-          icon: await _generate3DMarker(user.photoURL, Colors.green, miniStyle, user.displayName),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => UserProfileScreen(userId: doc.id))),
+          position: pos,
+          icon: await _generate3DMarker(user.photoURL, Colors.blue.shade700, miniStyle, user.displayName),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => UserProfileScreen(userId: user.uid))),
         );
       }
-      _userMarkers = newUsers;
     }
+    _userMarkers = newUserMarkers;
 
-    if (eventDocs != null) {
-      final Map<String, Marker> newEvents = {};
-      for (var doc in eventDocs) {
-        final event = Event.fromFirestore(doc);
-        newEvents[doc.id] = Marker(
-          markerId: MarkerId("event_${doc.id}"),
-          position: LatLng(event.latitude, event.longitude),
-          icon: await _generate3DEventMarker(event.type, miniStyle),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => EventDetailsScreen(event: event))),
-        );
-      }
-      _eventMarkers = newEvents;
-    }
-
-    if (pinDocs != null) {
-      final Map<String, Marker> newPins = {};
-      for (var doc in pinDocs) {
-        final pin = PinModel.fromFirestore(doc);
-        newPins[doc.id] = Marker(
-          markerId: MarkerId("pin_${doc.id}"),
-          position: LatLng(pin.latitude, pin.longitude),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          infoWindow: InfoWindow(title: pin.title), // POPRAWKA: InfoWindow zamiast InfoTitle
-        );
-      }
-      _pinMarkers = newPins;
-    }
     if (mounted) setState(() {});
+  }
+
+  Future<void> _playSpotifyPreview(String trackId) async {
+    final url = "https://p.scdn.co/mp3-preview/$trackId";
+    await _audioPlayer.play(UrlSource(url));
+  }
+
+  void _rollTheDice() {
+    if (_eventMarkers.isEmpty) return;
+    final random = Random();
+    final eventsList = _eventMarkers.values.toList();
+    final randomMarker = eventsList[random.nextInt(eventsList.length)];
+    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(randomMarker.position, 16));
+  }
+
+  void _refreshWithAd() {
+    _adService.showInterstitialAd(() {
+      _initializeMap();
+    });
   }
 
   void _onMapLongPress(LatLng point) {
     if (!_isAddingPin) return;
-    
+    _showAddPinDialog(point);
+  }
+
+  void _showAddPinDialog(LatLng point) {
     final TextEditingController pinController = TextEditingController();
+    final TextEditingController spotifyController = TextEditingController();
+    IconData selectedIcon = Icons.push_pin;
     final loc = AppLocalizations.of(context)!;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.black.withOpacity(0.9),
-        title: Text(loc.translate('name_point'), style: const TextStyle(color: Colors.green)),
-        content: TextField(
-          controller: pinController,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(hintText: loc.translate('pin_title_hint'), hintStyle: const TextStyle(color: Colors.grey)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.surfaceColor,
+          title: Text(loc.translate('name_point'), style: const TextStyle(color: AppColors.primaryColor)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: pinController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(hintText: loc.translate('pin_title_hint'), hintStyle: const TextStyle(color: Colors.grey)),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: spotifyController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(hintText: "Spotify Track ID", hintStyle: TextStyle(color: Colors.grey)),
+                ),
+                const SizedBox(height: 20),
+                Wrap(
+                  children: _availableIcons.map((icon) => IconButton(
+                    icon: Icon(icon, color: selectedIcon == icon ? AppColors.primaryColor : Colors.white54),
+                    onPressed: () => setDialogState(() => selectedIcon = icon),
+                  )).toList(),
+                )
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(child: Text(loc.translate('cancel')), onPressed: () => Navigator.pop(ctx)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryColor),
+              child: Text(loc.translate('save')),
+              onPressed: () async {
+                if (pinController.text.isEmpty) return;
+                final pin = PinModel(
+                  id: '',
+                  creatorId: _currentUserId,
+                  creatorName: _currentUserModel?.nickname ?? '',
+                  title: pinController.text,
+                  latitude: point.latitude,
+                  longitude: point.longitude,
+                  createdAt: DateTime.now(),
+                  spotifyTrackId: spotifyController.text.isNotEmpty ? spotifyController.text : null,
+                  visibilityRequirements: _currentUserModel?.visibilitySettings,
+                );
+                await _databaseService.createPin(pin);
+                Navigator.pop(ctx);
+                setState(() => _isAddingPin = false);
+                _fetchData();
+              },
+            ),
+          ],
         ),
-        actions: [
-          TextButton(child: Text(loc.translate('cancel')), onPressed: () => Navigator.pop(ctx)),
-          TextButton(
-            child: Text(loc.translate('save')),
-            onPressed: () async {
-              final pin = PinModel(
-                id: '',
-                creatorId: _currentUserId,
-                creatorName: _currentUserModel?.nickname ?? '', // Używamy Nicku
-                title: pinController.text,
-                latitude: point.latitude,
-                longitude: point.longitude,
-                createdAt: DateTime.now(),
-              );
-              await _databaseService.createPin(pin);
-              Navigator.pop(ctx);
-              setState(() => _isAddingPin = false);
-              _fetchData();
-            },
-          ),
-          ElevatedButton(
-            child: Text(loc.translate('create_event')),
-            onPressed: () {
-              Navigator.pop(ctx);
-              setState(() => _isAddingPin = false);
-              Navigator.push(context, MaterialPageRoute(builder: (context) => CreateEventScreen(
-                initialLat: point.latitude,
-                initialLng: point.longitude,
-              )));
-            },
-          ),
-        ],
       ),
     );
   }
 
-  void _rollTheDice() async {
-    _adService.showInterstitialAd();
-    final eventSnapshot = await _databaseService.getEventsOnce();
-    if (eventSnapshot.docs.isNotEmpty) {
-      final randomIdx = Random().nextInt(eventSnapshot.docs.length);
-      final event = Event.fromFirestore(eventSnapshot.docs[randomIdx]);
-      if (_mapController != null) {
-        _mapController!.animateCamera(CameraUpdate.newLatLngZoom(LatLng(event.latitude, event.longitude), 16));
-      }
-    }
-  }
-
-  void _handleRefresh() {
-    _adService.showInterstitialAd();
-    _initializeMap();
-  }
-
-  void _searchUser() {
-    final TextEditingController searchController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.black.withOpacity(0.9),
-        title: const Text("Szukaj użytkownika", style: TextStyle(color: Colors.green)),
-        content: TextField(
-          controller: searchController,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: "Wpisz nazwę...",
-            hintStyle: TextStyle(color: Colors.grey),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.green)),
-          ),
-        ),
-        actions: [
-          TextButton(child: const Text("Anuluj", style: TextStyle(color: Colors.grey)), onPressed: () => Navigator.pop(ctx)),
-          TextButton(
-            child: const Text("Szukaj", style: TextStyle(color: Colors.green)),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final snapshot = await _databaseService.getUsersOnce();
-              for (var doc in snapshot.docs) {
-                final data = doc.data() as Map<String, dynamic>;
-                if (data['displayName'].toString().toLowerCase().contains(searchController.text.toLowerCase())) {
-                  final GeoPoint? loc = data['location'];
-                  if (loc != null && _mapController != null) {
-                    _mapController!.animateCamera(CameraUpdate.newLatLngZoom(LatLng(loc.latitude, loc.longitude), 16));
-                    return;
-                  }
-                }
-              }
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Nie znaleziono użytkownika.")));
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<BitmapDescriptor> _generate3DMarker(String url, Color color, bool mini, String name) async {
+  Future<BitmapDescriptor> _generate3DMarker(String url, Color color, bool mini, String name, {bool isMe = false}) async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
     final double size = mini ? 100 : 160;
-    final Paint shadowPaint = Paint()..color = Colors.black.withOpacity(0.25)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-    canvas.drawOval(Rect.fromLTWH(size * 0.25, size * 0.85, size * 0.5, size * 0.15), shadowPaint);
-    final Paint bubblePaint = Paint()..color = Colors.white;
-    canvas.drawCircle(Offset(size/2, size/2 - 15), size/2 - 10, bubblePaint);
-    final Paint borderPaint = Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 6;
+    final Paint shadowPaint = Paint()..color = Colors.black.withOpacity(0.4)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+    canvas.drawOval(Rect.fromLTWH(size * 0.2, size * 0.85, size * 0.6, size * 0.15), shadowPaint);
+    final Paint ringPaint = Paint()..color = const Color(0xFF212121);
+    canvas.drawCircle(Offset(size/2, size/2 - 15), size/2 - 5, ringPaint);
+    final Paint borderPaint = Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 5;
     canvas.drawCircle(Offset(size/2, size/2 - 15), size/2 - 10, borderPaint);
-    await _drawAvatar(canvas, url, size - 35, size/2, size/2 - 15);
+    await _drawAvatar(canvas, url, size - 40, size/2, size/2 - 15);
+    final Path path = Path()..moveTo(size * 0.4, size * 0.75)..lineTo(size * 0.5, size * 0.95)..lineTo(size * 0.6, size * 0.75)..close();
+    canvas.drawPath(path, Paint()..color = color);
+    final ui.Image image = await pictureRecorder.endRecording().toImage(size.toInt(), size.toInt());
+    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+  }
+
+  Future<BitmapDescriptor> _generate3DPinMarker(String title, Color color, bool mini) async {
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+    final double size = mini ? 100 : 140;
+    final Paint shadowPaint = Paint()..color = Colors.black.withOpacity(0.3)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+    canvas.drawOval(Rect.fromLTWH(size * 0.3, size * 0.8, size * 0.4, size * 0.1), shadowPaint);
+    final Paint p = Paint()..color = color;
+    canvas.drawCircle(Offset(size/2, size/2 - 10), size/3, p);
+    final Paint border = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 3;
+    canvas.drawCircle(Offset(size/2, size/2 - 10), size/3, border);
+    final Path path = Path()..moveTo(size * 0.4, size * 0.6)..lineTo(size * 0.5, size * 0.85)..lineTo(size * 0.6, size * 0.6)..close();
+    canvas.drawPath(path, p);
+    final TextPainter tp = TextPainter(textDirection: TextDirection.ltr);
+    tp.text = TextSpan(text: String.fromCharCode(Icons.push_pin.codePoint), style: TextStyle(fontSize: size/4, fontFamily: Icons.push_pin.fontFamily, color: Colors.white));
+    tp.layout();
+    tp.paint(canvas, Offset(size/2 - tp.width/2, size/2 - 10 - tp.height/2));
     final ui.Image image = await pictureRecorder.endRecording().toImage(size.toInt(), size.toInt());
     final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
@@ -337,41 +405,33 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   Future<BitmapDescriptor> _generate3DEventMarker(String type, bool mini) async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
-    final double size = mini ? 90 : 140;
-    final Paint shadowPaint = Paint()..color = Colors.black.withOpacity(0.25)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
-    canvas.drawOval(Rect.fromLTWH(size * 0.25, size * 0.88, size * 0.5, size * 0.12), shadowPaint);
-    final Paint p = Paint()..color = Colors.orange.shade800;
-    canvas.drawCircle(Offset(size/2, size/2 - 12), size/2 - 8, p);
-    final Paint border = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 4;
-    canvas.drawCircle(Offset(size/2, size/2 - 12), size/2 - 8, border);
-    final TextPainter iconPainter = TextPainter(textDirection: TextDirection.ltr);
-    iconPainter.text = TextSpan(
-      text: _getEventIconChar(type),
-      style: TextStyle(fontSize: size/2, color: Colors.white, fontFamily: 'MaterialIcons'),
-    );
-    iconPainter.layout();
-    iconPainter.paint(canvas, Offset(size/2 - iconPainter.width/2, size/2 - 12 - iconPainter.height/2));
+    final double size = mini ? 100 : 150;
+    final Color eventColor = const Color(0xFFFFD700);
+    final Paint shadowPaint = Paint()..color = Colors.black.withOpacity(0.4)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    canvas.drawOval(Rect.fromLTWH(size * 0.25, size * 0.85, size * 0.5, size * 0.1), shadowPaint);
+    final Paint p = Paint()..color = eventColor;
+    canvas.drawCircle(Offset(size/2, size/2 - 15), size/2.5, p);
+    final Paint border = Paint()..color = const Color(0xFFB8860B)..style = PaintingStyle.stroke..strokeWidth = 4;
+    canvas.drawCircle(Offset(size/2, size/2 - 15), size/2.5, border);
+    final Path path = Path()..moveTo(size * 0.4, size * 0.7)..lineTo(size * 0.5, size * 0.95)..lineTo(size * 0.6, size * 0.7)..close();
+    canvas.drawPath(path, p);
+    IconData icon = Icons.event;
+    if (type == 'Kino') icon = Icons.movie;
+    else if (type == 'Bar') icon = Icons.local_bar;
+    else if (type == 'Spacer') icon = Icons.directions_walk;
+    else if (type == 'Impreza') icon = Icons.celebration;
+    final TextPainter tp = TextPainter(textDirection: TextDirection.ltr);
+    tp.text = TextSpan(text: String.fromCharCode(icon.codePoint), style: TextStyle(fontSize: size/3, fontFamily: icon.fontFamily, color: Colors.black87));
+    tp.layout();
+    tp.paint(canvas, Offset(size/2 - tp.width/2, size/2 - 15 - tp.height/2));
     final ui.Image image = await pictureRecorder.endRecording().toImage(size.toInt(), size.toInt());
     final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
   }
 
-  String _getEventIconChar(String type) {
-    switch (type) {
-      case 'cinema': return String.fromCharCode(Icons.movie.codePoint);
-      case 'walk': return String.fromCharCode(Icons.directions_walk.codePoint);
-      case 'bar': return String.fromCharCode(Icons.local_bar.codePoint);
-      case 'restaurant': return String.fromCharCode(Icons.restaurant.codePoint);
-      case 'board_games': return String.fromCharCode(Icons.casino.codePoint);
-      case 'match': return String.fromCharCode(Icons.sports_soccer.codePoint);
-      case 'concert': return String.fromCharCode(Icons.music_note.codePoint);
-      default: return String.fromCharCode(Icons.event.codePoint);
-    }
-  }
-
   Future<void> _drawAvatar(Canvas canvas, String url, double size, double x, double y) async {
     if (url.isEmpty) {
-      canvas.drawCircle(Offset(x, y), size/2, Paint()..color = Colors.grey);
+      canvas.drawCircle(Offset(x, y), size/2, Paint()..color = Colors.blueGrey.shade700);
       return;
     }
     try {
@@ -382,9 +442,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       canvas.clipPath(Path()..addOval(Rect.fromCenter(center: Offset(x, y), width: size, height: size)));
       canvas.drawImage(frameInfo.image, Offset(x - size/2, y - size/2), Paint());
       canvas.restore();
-    } catch (e) {
-      canvas.drawCircle(Offset(x, y), size/2, Paint()..color = Colors.grey);
-    }
+    } catch (e) { canvas.drawCircle(Offset(x, y), size/2, Paint()..color = Colors.blueGrey.shade700); }
   }
 
   void _goToCurrentLocation() {
@@ -393,11 +451,56 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     }
   }
 
+  void _searchUser() {
+     final TextEditingController searchController = TextEditingController();
+     showDialog(
+       context: context,
+       builder: (ctx) => AlertDialog(
+         backgroundColor: AppColors.surfaceColor,
+         title: const Text("Szukaj użytkownika", style: TextStyle(color: Colors.white)),
+         content: TextField(
+           controller: searchController,
+           style: const TextStyle(color: Colors.white),
+           decoration: const InputDecoration(hintText: "Wpisz nick...", hintStyle: TextStyle(color: Colors.grey)),
+         ),
+         actions: [
+           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Anuluj")),
+           ElevatedButton(
+             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryColor),
+             onPressed: () async {
+                final query = await FirebaseFirestore.instance.collection('users')
+                  .where('nickname', isEqualTo: searchController.text.trim())
+                  .get();
+                
+                if (query.docs.isNotEmpty) {
+                  final userData = query.docs.first.data();
+                  if (userData['location'] != null) {
+                    GeoPoint loc = userData['location'];
+                    Navigator.pop(ctx);
+                    
+                    // Używamy jumpToLocationOnMap z managera, aby zachować spójność
+                    Provider.of<AppStateManager>(context, listen: false)
+                      .jumpToLocationOnMap(LatLng(loc.latitude, loc.longitude));
+                  }
+                }
+             },
+             child: const Text("Szukaj"),
+           )
+         ],
+       ),
+     );
+  }
+
   @override
   Widget build(BuildContext context) {
     final appState = Provider.of<AppStateManager>(context);
     final loc = AppLocalizations.of(context)!;
     
+    if (_mapController != null && _lastAppliedStyle != appState.mapStyle) {
+      _lastAppliedStyle = appState.mapStyle;
+      _mapController!.setMapStyle(MapStyles.styles[appState.mapStyle]);
+    }
+
     Set<Marker> allMarkers = {};
     if (_myMarker != null) allMarkers.add(_myMarker!);
     allMarkers.addAll(_userMarkers.values);
@@ -410,10 +513,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         : Stack(
             children: [
               GoogleMap(
-                initialCameraPosition: CameraPosition(
-                  target: LatLng(_currentPosition?.latitude ?? 52.2, _currentPosition?.longitude ?? 21.0), 
-                  zoom: 14
-                ),
+                initialCameraPosition: CameraPosition(target: LatLng(_currentPosition?.latitude ?? 52.2, _currentPosition?.longitude ?? 21.0), zoom: 14),
                 onMapCreated: (c) {
                   _mapController = c;
                   _mapController!.setMapStyle(MapStyles.styles[appState.mapStyle]);
@@ -424,108 +524,58 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                 onCameraMove: (pos) => _currentZoom = pos.zoom,
                 myLocationEnabled: false,
                 zoomControlsEnabled: false,
+                padding: const EdgeInsets.only(top: 100),
               ),
-
-              if (_showBanner)
-                Positioned(
-                  top: 80, left: 30, right: 30,
-                  child: ScaleTransition(
-                    scale: _bannerScale,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.green.withOpacity(0.6), width: 1.5),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 15, spreadRadius: 2)],
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.info_outline, color: Colors.green, size: 30),
-                          const SizedBox(width: 15),
-                          Expanded(
-                            child: Text(
-                              loc.translate('watch_ad_to_refresh'),
-                              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, height: 1.4),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close, color: Colors.white54),
-                            onPressed: () {
-                              if (mounted) {
-                                _bannerController.reverse().then((_) {
-                                  if (mounted) setState(() => _showBanner = false);
-                                });
-                              }
-                            },
-                          )
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-
-              if (_isAddingPin)
-                Positioned(
-                  top: 60, left: 40, right: 40,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-                    decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.cyanAccent)),
-                    child: Text(loc.translate('add_pin_hint'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-
               Positioned(
-                top: 40,
-                right: 20,
+                top: 20, left: 15, right: 15,
+                child: Container(
+                  height: 50,
+                  decoration: BoxDecoration(color: AppColors.surfaceColor, borderRadius: BorderRadius.circular(25), boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 10)]),
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 15),
+                      const Icon(Icons.search, color: Colors.grey),
+                      const SizedBox(width: 10),
+                      Expanded(child: GestureDetector(onTap: _searchUser, child: const Text("Szukaj na mapie...", style: TextStyle(color: Colors.grey)))),
+                      IconButton(
+                        icon: Icon(appState.isOnline ? Icons.visibility : Icons.visibility_off, color: appState.isOnline ? AppColors.primaryColor : Colors.red),
+                        onPressed: () => appState.toggleOnlineStatus(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 100, right: 15,
                 child: Column(
                   children: [
-                    // 1. OKO (ONLINE/OFFLINE)
-                    FloatingActionButton(
-                      heroTag: 'eye_btn', 
-                      onPressed: () => appState.toggleOnlineStatus(), 
-                      mini: true, 
-                      backgroundColor: appState.isOnline ? Colors.green : Colors.red, 
-                      child: Icon(appState.isOnline ? Icons.visibility : Icons.visibility_off, color: Colors.white)
-                    ),
-                    const SizedBox(height: 10),
-                    // 2. WIDOCZNOŚĆ (PUBLICZNY / PRYWATNY)
-                    FloatingActionButton(
-                      heroTag: 'visibility_toggle_btn', 
-                      onPressed: () => appState.toggleVisibility(), 
-                      mini: true, 
-                      backgroundColor: appState.visibility == 'public' ? Colors.blue : Colors.purple, 
-                      child: Icon(appState.visibility == 'public' ? Icons.public : Icons.group, color: Colors.white)
-                    ),
-                    const SizedBox(height: 10),
-                    // 3. KOSTKA
-                    FloatingActionButton(heroTag: 'dice_btn', onPressed: _rollTheDice, mini: true, backgroundColor: Colors.orange, child: const Icon(Icons.casino, color: Colors.white)),
-                    const SizedBox(height: 10),
-                    // 4. REFRESH
-                    FloatingActionButton(heroTag: 'ref_btn', onPressed: _handleRefresh, mini: true, backgroundColor: Colors.white, child: const Icon(Icons.refresh, color: Colors.black)),
-                    const SizedBox(height: 10),
-                    // 5. CENTRUJ
-                    FloatingActionButton(heroTag: 'loc_btn', onPressed: _goToCurrentLocation, mini: true, backgroundColor: Colors.white, child: const Icon(Icons.my_location, color: Colors.black)),
-                    const SizedBox(height: 10),
-                    // 6. DODAJ WYDARZENIE
-                    FloatingActionButton(heroTag: 'add_event_btn', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateEventScreen())), mini: true, backgroundColor: Colors.blue, child: const Icon(Icons.add, color: Colors.white)),
-                    const SizedBox(height: 10),
-                    // 7. SZUKAJ
-                    FloatingActionButton(heroTag: 'search_user_btn', onPressed: _searchUser, mini: true, backgroundColor: Colors.teal, child: const Icon(Icons.person_search, color: Colors.white)),
-                    const SizedBox(height: 10),
-                    // 8. PINEZKA
-                    FloatingActionButton(
-                      heroTag: 'add_pin_btn', 
-                      onPressed: () => setState(() => _isAddingPin = !_isAddingPin), 
-                      mini: true, 
-                      backgroundColor: _isAddingPin ? Colors.cyanAccent : Colors.white, 
-                      child: Icon(Icons.push_pin, color: _isAddingPin ? Colors.white : Colors.black)
-                    ),
+                    _mapButton(Icons.add_location_alt, () => Navigator.push(context, MaterialPageRoute(builder: (c) => const CreateEventScreen())), hero: 'add_ev'),
+                    _mapButton(Icons.push_pin, () => setState(() => _isAddingPin = !_isAddingPin), color: _isAddingPin ? Colors.orange : Colors.white, hero: 'pin'),
+                    _mapButton(Icons.people, () {
+                      setState(() => _showOnlyFriends = !_showOnlyFriends);
+                      _fetchData();
+                    }, color: _showOnlyFriends ? AppColors.primaryColor : Colors.white, hero: 'friends_filter'),
+                    _mapButton(Icons.casino, _rollTheDice, color: Colors.amber, hero: 'dice'),
+                    _mapButton(Icons.refresh, _refreshWithAd, hero: 'refresh'),
+                    _mapButton(Icons.my_location, _goToCurrentLocation, hero: 'my_loc'),
                   ],
                 ),
               ),
             ],
           ),
+    );
+  }
+
+  Widget _mapButton(IconData icon, VoidCallback onTap, {Color color = Colors.white, required String hero}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: FloatingActionButton(
+        heroTag: hero,
+        onPressed: onTap,
+        mini: true,
+        backgroundColor: AppColors.surfaceColor,
+        child: Icon(icon, color: color, size: 20),
+      ),
     );
   }
 }

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:joinme2/app_state_manager.dart';
 import 'package:joinme2/services/database_service.dart';
 import 'package:joinme2/screens/chat_screen.dart';
 import 'package:joinme2/utils/app_localizations.dart';
 import 'package:joinme2/utils/constants.dart';
+import 'package:provider/provider.dart';
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
@@ -57,6 +60,8 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
   }
 
   Widget _buildFriendsList(AppLocalizations loc) {
+    final appState = Provider.of<AppStateManager>(context, listen: false);
+    
     return StreamBuilder<DocumentSnapshot>(
       stream: _databaseService.getFriends(_currentUserId),
       builder: (context, snapshot) {
@@ -80,6 +85,8 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                 final data = userSnapshot.data!.data() as Map<String, dynamic>?;
                 if (data == null) return const SizedBox.shrink();
 
+                final GeoPoint? location = data['location'] as GeoPoint?;
+
                 return ListTile(
                   leading: CircleAvatar(
                     backgroundImage: (data['photoURL'] != null && data['photoURL'].toString().isNotEmpty)
@@ -90,6 +97,15 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                         : null,
                   ),
                   title: Text(isMe ? "${data['displayName']} (${loc.translate('saved_messages')})" : (data['displayName'] ?? '...')),
+                  trailing: !isMe && location != null 
+                    ? IconButton(
+                        icon: const Icon(Icons.location_on, color: Colors.blue),
+                        tooltip: loc.translate('show_on_map'),
+                        onPressed: () {
+                          appState.jumpToLocationOnMap(LatLng(location.latitude, location.longitude));
+                        },
+                      )
+                    : null,
                   onTap: () {
                     Navigator.push(context, MaterialPageRoute(builder: (context) => ChatScreen(
                       peerId: targetUid,
